@@ -6,6 +6,7 @@ services:
     volumes:
       - ./config/has:/config
       - /etc/localtime:/etc/localtime:ro
+      - /mnt/external_disk:/mnt/external_disk/:ro
     restart: always
     privileged: true
     # Its recommend to use this network mode.

@@ -27,3 +27,33 @@ http:
   trusted_proxies:
     - 127.0.0.1
     - ::1
+
+rest:
+  # Query pollen values for automatons from the German weather service.
+  - scan_interval: 300
+    resource: "https://opendata.dwd.de/climate_environment/health/alerts/s31fg.json"
+    sensor:
+      - name: "Pollenflug Graser"
+        json_attributes_path: "$.response"
+        value_template : "{{ value_json.content[3].Pollen.Graeser.today }}" 
+      - name: "Pollenflug Ambrosia"
+        json_attributes_path: "$.response"
+        value_template : "{{ value_json.content[3].Pollen.Ambrosia.today }}"
+      - name: "Pollenflug Roggen"
+        json_attributes_path: "$.response"
+        value_template : "{{ value_json.content[3].Pollen.Roggen.today }}"
+      - name: "Pollenflug Beifuss"
+        json_attributes_path: "$.response"
+        value_template : "{{ value_json.content[3].Pollen.Beifuss.today }}"
+      - name: "Pollenflug Hasel"
+        json_attributes_path: "$.response"
+        value_template : "{{ value_json.content[3].Pollen.Hasel.today }}"
+      - name: "Pollenflug Erle"
+        json_attributes_path: "$.response"
+        value_template : "{{ value_json.content[3].Pollen.Erle.today }}"
+      - name: "Pollenflug Birke"
+        json_attributes_path: "$.response"
+        value_template : "{{ value_json.content[3].Pollen.Birke.today }}"
+      - name: "Pollenflug Esche"
+        json_attributes_path: "$.response"
+        value_template : "{{ value_json.content[3].Pollen.Esche.today }}"

@@ -1,0 +1,29 @@
+---
+# Loads default set of integration's. Do not remove.
+default_config:
+
+# This Section is including basic configuration of the home assistant,
+homeassistant:
+  unit_system: metric
+  # NOTE: Change here if the URL of the has System has changed.
+  internal_url: http://server-albano.fritz.box:8123
+  external_url: https://home.albano.xyz:443
+  auth_providers:
+    - type: homeassistant
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+# The Zone is including information where my home is.
+# Therefore this parameter is moved to an extra file, which will not checked in.
+zone: !include zones.yaml
+
+# Text to speech, use full for testing speakers
+tts:
+  - platform: google_translate
+
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 127.0.0.1
+    - ::1

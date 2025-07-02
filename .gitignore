@@ -1,0 +1,5 @@
+# It could be the case that I wanted to override certain things on the Server,
+# this doesn't has to be tracked by git.
+docker-compose.override.yml
+data/
+log/

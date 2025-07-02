@@ -1,0 +1,31 @@
+version: '2'
+services:
+  homeassistant:
+    container_name: homeassistant
+    image: "ghcr.io/home-assistant/home-assistant:stable"
+    volumes:
+      - ./config/has:/config
+      - /etc/localtime:/etc/localtime:ro
+    restart: always
+    privileged: true
+    # Its recommend to use this network mode.
+    # Generally speaking this network mode should be avoided, but some parts of
+    # HAS are not working in other mode (e.g. Discovery for new devices).
+    # Therefore I use this mode.
+    network_mode: host
+    mem_limit: 300m
+
+  mosquitto:
+    image: eclipse-mosquitto
+    container_name: mosquitto
+    restart: always
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./config/mosquitto:/mosquitto/config
+      - ./data/mosquitto:/mosquitto/data
+      - ./log/mosquitto:/mosquitto/log
+    environment:
+      - TZ=Europe/Berlin 
+    mem_limit: 50m
+

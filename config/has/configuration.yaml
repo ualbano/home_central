@@ -29,6 +29,17 @@ http:
     - ::1
 
 rest:
+  #  Retrieving the remaining time of the timer from an adapter shelly plug.
+  - scan_interval: 10
+    resource: http://192.168.6.25/relay/0
+    sensor:
+      - name: "Kaffeemaschiene Timer"
+        json_attributes_path: "$.response.timer_remaining"
+        # The Value is delivered in seconds to display this in minutes a divided
+        # the value by 60.
+        value_template: "{{ value_json.timer_remaining| multiply(0.0166667) | round(0) }}"
+        unique_id: kaffemaschiene_timer
+
   # Query pollen values for automatons from the German weather service.
   - scan_interval: 300
     resource: "https://opendata.dwd.de/climate_environment/health/alerts/s31fg.json"

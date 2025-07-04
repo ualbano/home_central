@@ -10,7 +10,7 @@
 set -eu
 
 #NOTE: Change here to edit the backup target
-TARGET_BACKUP_DIR="${BACKUP_DIR:-/srv/backups}"
+TARGET_BACKUP_DIR="${BACKUP_DIR:-/mnt/external_disk/backups/homecentral}"
 DAYS_TO_RETAIN="${DAYS_TO_RETAIN:-30}"
 #HAS is storing all data to config/has, this location needs to be backed up, even if there the configurations.
 SOURCE_BACKUP_DIRS=("config/has" "data/")

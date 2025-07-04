@@ -30,3 +30,16 @@ services:
       - TZ=Europe/Berlin 
     mem_limit: 50m
 
+  zigbee2mqtt:
+    container_name: zigbee2mqtt
+    image: ghcr.io/koenkk/zigbee2mqtt
+    restart: always
+    volumes:
+      - ./data/zigbee:/app/data
+      - /run/udev:/run/udev:ro
+    ports:
+      - 8082:8080
+    environment:
+      - TZ=Europe/Berlin
+    devices:
+      - /dev/serial/by-id/usb-ITead_Sonoff_Zigbee_3.0_USB_Dongle_Plus_808098872780ef1189a7181cedd322a4-if00-port0:/dev/ttyACM0

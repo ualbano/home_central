@@ -47,6 +47,20 @@ but some configurations can only be made in the configuration file, therefore th
 For some devices I need MQTT to connect them, therefore I added this MQTT
 Broker.
 
+### Zigbee2Mqtt
+
+I have several devices that run on Zigbee and I want to avoid having
+a gateway from Phillips or Ikea because it needs a place to mount on it and some
+features are not supported by them. 
+Luckily for me I found this nice tool zigbee2mqtt. I connect a sonoff
+zigbee stick to my server and this tool connects my devices via mqtt to my
+system. The Devices can be readed and controlled by HAS over MQTT. Every Devices
+is a "MQTT Device" in HAS with all the corresponding entities.
+
+I can use this stick directly in Homeassistant, but this way seems cooler to me.
+
+Thank you for providing me this docker compose entry zigbee2mqtt: https://www.zigbee2mqtt.io/guide/installation/02_docker.html
+
 ## Maintenance Scripts
 
 To maintain my central, I have added different scripts to this Repo.

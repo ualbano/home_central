@@ -14,7 +14,7 @@ services:
     # HAS are not working in other mode (e.g. Discovery for new devices).
     # Therefore I use this mode.
     network_mode: host
-    mem_limit: 300m
+    mem_limit: 2g
 
   mosquitto:
     image: eclipse-mosquitto

@@ -15,7 +15,24 @@ services:
     # Therefore I use this mode.
     network_mode: host
     mem_limit: 2g
-
+    labels:
+      autoupdate: true
+      autoupdate.timeout: 120
+ 
+  matter-server:
+    container_name: matter-server
+    image: ghcr.io/home-assistant-libs/python-matter-server:stable
+    restart: unless-stopped
+    security_opt:
+      - apparmor=unconfined
+    volumes:
+      - ./data/matter-server/:/data
+      - /run/dbus:/run/dbus:ro
+    network_mode: host
+    labels:
+      autoupdate: true
+      autoupdate.timeout: 120
+ 
   mosquitto:
     image: eclipse-mosquitto
     container_name: mosquitto
@@ -29,7 +46,10 @@ services:
     environment:
       - TZ=Europe/Berlin 
     mem_limit: 50m
-
+    labels:
+      autoupdate: true
+      autoupdate.timeout: 120
+ 
   zigbee2mqtt:
     container_name: zigbee2mqtt
     image: ghcr.io/koenkk/zigbee2mqtt
@@ -43,3 +63,7 @@ services:
       - TZ=Europe/Berlin
     devices:
       - /dev/serial/by-id/usb-ITead_Sonoff_Zigbee_3.0_USB_Dongle_Plus_808098872780ef1189a7181cedd322a4-if00-port0:/dev/ttyACM0
+    labels:
+      autoupdate: true
+      autoupdate.timeout: 120
+ 

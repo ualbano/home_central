@@ -1,0 +1,306 @@
+# ═══════════════════════════════════════════════════════════════
+#  ENYAQ LADELOG  –  Ladungen mit Preis erfassen
+# ═══════════════════════════════════════════════════════════════
+#
+#  Ablauf
+#  • Kabel eingesteckt → Akkustand, Ort und Uhrzeit werden gemerkt.
+#  • Kabel gezogen → Ladung wird eingetragen (geladene kWh aus Akku-Differenz)
+#    und es kommt eine Push-Nachricht mit Antwortfeld: Preis pro kWh eintippen.
+#    Eine Zahl über 3 wird als Gesamtbetrag in € verstanden.
+#  • Verpasst? Auf dem Dashboard für die letzte offene Ladung nachtragen.
+#
+#  Anpassen
+#  • Push-Dienst: unten bei  notify.mobile_app_iphone  (1 Stelle).
+#  • CSV-Export: File-Integration → "Benachrichtigungsdienst in Datei",
+#    Pfad /config/ladelog.csv, Zeitstempel AUS, Entitäts-ID auf
+#    notify.ladelog_csv  umbenennen, dann einmal das Skript
+#    "Enyaq Ladelog: CSV-Kopfzeile schreiben" ausführen.
+#
+#  Hinweis: Geladene kWh = Akku-Differenz × nutzbare Kapazität. Bezahlt wird
+#  mehr, weil beim Laden Verluste entstehen → input_number.enyaq_ladeverlust.
+# ═══════════════════════════════════════════════════════════════
+
+input_number:
+  enyaq_ladeverlust:
+    name: Enyaq Ladeverlust
+    icon: mdi:transmission-tower-export
+    min: 0
+    max: 25
+    step: 1
+    initial: 10
+    unit_of_measurement: "%"
+    mode: box
+  enyaq_ladepreis_eingabe:
+    name: Enyaq Ladepreis nachtragen
+    icon: mdi:currency-eur
+    min: 0
+    max: 200
+    step: 0.01
+    unit_of_measurement: €
+    mode: box
+
+# ─────────────────────────── Automationen ───────────────────────────
+automation:
+  - id: enyaq_ladelog_ladung_beendet
+    alias: "Enyaq Ladelog: Ladung beendet"
+    description: Trägt die Ladung beim Abstecken ein und fragt per Push nach dem Preis.
+    mode: single
+    max_exceeded: silent
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.enyaq_charging_cable
+        from: "on"
+        to: "off"
+    actions:
+      - delay: "00:00:30"
+      - variables:
+          aktiv: "{{ state_attr('sensor.enyaq_ladelog', 'aktiv') }}"
+          cap: "{{ states('input_number.enyaq_akku_netto') | float(77) }}"
+          soc_now: "{{ states('sensor.enyaq_battery_level') | float(-1) }}"
+      - condition: template
+        value_template: "{{ aktiv is mapping }}"
+      - variables:
+          soc_ende: "{{ [aktiv.soc_max | float(0), soc_now] | max }}"
+          lid: "{{ now().timestamp() | int }}"
+      - variables:
+          kwh: "{{ ((soc_ende - aktiv.soc_start | float(0)) / 100 * cap) | round(1) }}"
+          ort_kurz: "{{ (aktiv.ort or '?').split(',')[0] }}"
+      - event: enyaq_ladung_ende
+        event_data:
+          id: "{{ lid }}"
+          start: "{{ aktiv.start }}"
+          ende: "{{ now().isoformat() }}"
+          ort: "{{ aktiv.ort }}"
+          soc_start: "{{ aktiv.soc_start | int }}"
+          soc_ende: "{{ soc_ende | int }}"
+          kwh: "{{ kwh }}"
+          preis: "{{ none }}"
+          kosten: "{{ none }}"
+      # nur sinnvolle Ladungen abfragen
+      - condition: template
+        value_template: "{{ kwh >= 1 }}"
+      - action: notify.mobile_app_iphone
+        data:
+          title: "⚡ Ladung beendet"
+          message: >-
+            {{ ort_kurz }}: {{ aktiv.soc_start | int }} → {{ soc_ende | int }} %
+            (+{{ ('%.1f' % kwh) | replace('.', ',') }} kWh). Was hat die kWh gekostet?
+          data:
+            tag: "enyaq-ladung-{{ lid }}"
+            actions:
+              - action: "ENYAQ_PREIS_{{ lid }}"
+                title: Preis eintragen
+                behavior: textInput
+                textInputButtonTitle: Speichern
+                textInputPlaceholder: "0,59"
+
+  - id: enyaq_ladelog_preis_antwort
+    alias: "Enyaq Ladelog: Preis aus Push übernehmen"
+    mode: queued
+    triggers:
+      - trigger: event
+        event_type: mobile_app_notification_action
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ (trigger.event.data.action | default('')) is string
+             and (trigger.event.data.action | default('')).startswith('ENYAQ_PREIS_') }}
+    actions:
+      - action: script.enyaq_ladung_preis_setzen
+        data:
+          ladung_id: "{{ trigger.event.data.action[12:] }}"
+          preis: "{{ trigger.event.data.reply_text | default('') }}"
+
+# ─────────────────────────── Skripte ───────────────────────────
+script:
+  enyaq_ladung_preis_setzen:
+    alias: "Enyaq Ladelog: Preis eintragen"
+    icon: mdi:cash-plus
+    mode: queued
+    fields:
+      preis:
+        name: Preis
+        description: €/kWh (z. B. 0,59) – Werte über 3 gelten als Gesamtbetrag in €
+        required: true
+        selector:
+          text:
+      ladung_id:
+        name: Ladung
+        description: leer = letzte Ladung ohne Preis
+        required: false
+        selector:
+          text:
+    sequence:
+      - variables:
+          ladungen: "{{ state_attr('sensor.enyaq_ladelog', 'ladungen') or [] }}"
+          p: "{{ (preis | string | replace('€', '') | replace(',', '.') | trim) | float(-1) }}"
+          sid: >-
+            {%- if ladung_id is defined and ladung_id | string | length > 0 -%}{{ ladung_id | string }}
+            {%- else -%}{%- set offen = ladungen | selectattr('preis', 'none') | list -%}{{ offen[0].id | string if offen else '' }}
+            {%- endif -%}
+      - variables:
+          l: "{{ ladungen | selectattr('id', 'eq', sid | int(0)) | list | first | default(none) }}"
+      - condition: template
+        value_template: "{{ p > 0 and l is mapping and l.kwh > 0 }}"
+      - variables:
+          verlust: "{{ states('input_number.enyaq_ladeverlust') | float(10) }}"
+      - variables:
+          kwh_bezahlt: "{{ (l.kwh * (1 + verlust / 100)) | round(1) }}"
+      - variables:
+          gesamt_eingegeben: "{{ p > 3 }}"
+          kosten: "{{ (p if p > 3 else kwh_bezahlt * p) | round(2) }}"
+          kwh_preis: "{{ (p / kwh_bezahlt if p > 3 else p) | round(3) }}"
+      - event: enyaq_ladung_preis
+        event_data:
+          id: "{{ l.id }}"
+          preis: "{{ kwh_preis }}"
+          kosten: "{{ kosten }}"
+          kwh_bezahlt: "{{ kwh_bezahlt }}"
+          # Korrektur: alten Betrag von der Summe abziehen
+          kosten_alt: "{{ l.kosten if l.kosten is number else 0 }}"
+          kwh_alt: "{{ (l.kwh * (1 + verlust / 100)) | round(1) if l.kosten is number else 0 }}"
+      - action: notify.send_message
+        continue_on_error: true
+        target:
+          entity_id: notify.ladelog_csv
+        data:
+          message: >-
+            {%- macro n(x, f='%.2f') -%}{{ (f % x) | replace('.', ',') }}{%- endmacro -%}
+            {%- set s = as_local(as_datetime(l.ende)) -%}
+            {{ s.strftime('%d.%m.%Y') }};{{ s.strftime('%H:%M') }};{{ (l.ort or '?') | replace(';', ',') }};{{ l.soc_start }};{{ l.soc_ende }};{{ n(l.kwh, '%.1f') }};{{ n(kwh_bezahlt, '%.1f') }};{{ n(kwh_preis, '%.3f') }};{{ n(kosten) }}
+
+  enyaq_ladepreis_nachtragen:
+    alias: "Enyaq Ladelog: Preis nachtragen (Dashboard)"
+    icon: mdi:cash-check
+    sequence:
+      - action: script.enyaq_ladung_preis_setzen
+        data:
+          preis: "{{ states('input_number.enyaq_ladepreis_eingabe') }}"
+
+  enyaq_ladelog_csv_kopfzeile:
+    alias: "Enyaq Ladelog: CSV-Kopfzeile schreiben"
+    icon: mdi:table-headers-eye
+    sequence:
+      - action: notify.send_message
+        target:
+          entity_id: notify.ladelog_csv
+        data:
+          message: "Datum;Uhrzeit;Ort;Akku Start %;Akku Ende %;kWh in Akku;kWh bezahlt (geschätzt);€/kWh;Kosten €"
+
+  enyaq_ladelog_zuruecksetzen:
+    alias: "Enyaq Ladelog: Liste leeren"
+    icon: mdi:notebook-remove-outline
+    sequence:
+      - event: enyaq_ladelog_reset
+
+# ─────────────────────────── Sensoren ───────────────────────────
+template:
+  # Ladelog: Zustand = Ø bezahlter Preis €/kWh, Attribut "ladungen" = letzte 30
+  - triggers:
+      - trigger: state
+        entity_id: binary_sensor.enyaq_charging_cable
+        to: "on"
+        id: plug
+      - trigger: state
+        entity_id: sensor.enyaq_battery_level
+        id: soc
+      - trigger: event
+        event_type: enyaq_ladung_ende
+        id: ende
+      - trigger: event
+        event_type: enyaq_ladung_preis
+        id: preis
+      - trigger: event
+        event_type: enyaq_ladelog_reset
+        id: reset
+    actions:
+      - variables:
+          soc_now: "{{ states('sensor.enyaq_battery_level') | float(-1) }}"
+          addr_now: >-
+            {%- set a = states('sensor.enyaq_address') -%}{{ a if a not in ['unknown', 'unavailable'] else '?' }}
+          old: "{{ [] if trigger.id == 'reset' else (this.attributes.ladungen | default([])) }}"
+          aktiv: "{{ none if trigger.id == 'reset' else (this.attributes.aktiv | default(none)) }}"
+      - variables:
+          neu_aktiv: >-
+            {%- if trigger.id == 'plug' and soc_now >= 0 -%}
+              {{ dict(start=now().isoformat(), soc_start=soc_now, soc_max=soc_now, ort=addr_now) }}
+            {%- elif trigger.id == 'soc' and aktiv is mapping and soc_now > aktiv.soc_max -%}
+              {{ dict(aktiv, soc_max=soc_now) }}
+            {%- elif trigger.id == 'soc' and aktiv is not mapping and soc_now >= 0
+                 and is_state('binary_sensor.enyaq_charging', 'on') -%}
+              {{ dict(start=now().isoformat(), soc_start=soc_now, soc_max=soc_now, ort=addr_now) }}
+            {%- elif trigger.id in ['ende', 'reset'] -%}
+              {{ none }}
+            {%- else -%}
+              {{ aktiv }}
+            {%- endif -%}
+          neu_ladungen: >-
+            {%- if trigger.id == 'ende' and trigger.event.data.kwh | float(0) >= 1 -%}
+              {{ ([dict(trigger.event.data)] + old)[:30] }}
+            {%- elif trigger.id == 'preis' -%}
+              {%- set d = trigger.event.data -%}
+              {%- set ns = namespace(l=[]) -%}
+              {%- for x in old -%}
+                {%- if x.id == d.id -%}
+                  {%- set ns.l = ns.l + [dict(x, preis=d.preis, kosten=d.kosten)] -%}
+                {%- else -%}
+                  {%- set ns.l = ns.l + [x] -%}
+                {%- endif -%}
+              {%- endfor -%}
+              {{ ns.l }}
+            {%- else -%}
+              {{ old }}
+            {%- endif -%}
+    sensor:
+      - name: Enyaq Ladelog
+        unique_id: enyaq_ladelog
+        icon: mdi:ev-station
+        unit_of_measurement: €/kWh
+        state: >-
+          {%- set v = neu_ladungen | rejectattr('kosten', 'none') | list -%}
+          {%- set verlust = states('input_number.enyaq_ladeverlust') | float(10) -%}
+          {%- set kwh = (v | sum(attribute='kwh')) * (1 + verlust / 100) -%}
+          {{ ((v | sum(attribute='kosten')) / kwh) | round(3) if kwh > 0 else none }}
+        attributes:
+          ladungen: "{{ neu_ladungen }}"
+          aktiv: "{{ neu_aktiv }}"
+          offen: "{{ neu_ladungen | selectattr('preis', 'none') | list | count }}"
+
+  # Summen der bezahlten Ladungen – Basis für Monatswerte
+  - triggers:
+      - trigger: event
+        event_type: enyaq_ladung_preis
+    sensor:
+      - name: Enyaq Ladekosten gesamt
+        unique_id: enyaq_ladekosten_gesamt
+        icon: mdi:cash-multiple
+        unit_of_measurement: €
+        state_class: total_increasing
+        state: >-
+          {%- set d = trigger.event.data -%}
+          {{ ((this.state | float(0)) + d.kosten - d.kosten_alt) | round(2) }}
+      - name: Enyaq Ladeenergie bezahlt gesamt
+        unique_id: enyaq_ladeenergie_bezahlt_gesamt
+        icon: mdi:ev-plug-type2
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: >-
+          {%- set d = trigger.event.data -%}
+          {{ ((this.state | float(0)) + d.kwh_bezahlt - d.kwh_alt) | round(1) }}
+
+  - binary_sensor:
+      - name: Enyaq Ladung ohne Preis
+        unique_id: enyaq_ladung_ohne_preis
+        icon: mdi:cash-remove
+        state: "{{ state_attr('sensor.enyaq_ladelog', 'offen') | int(0) > 0 }}"
+
+utility_meter:
+  enyaq_ladekosten_monat:
+    name: Enyaq Ladekosten Monat
+    source: sensor.enyaq_ladekosten_gesamt
+    cycle: monthly
+  enyaq_ladeenergie_monat:
+    name: Enyaq Ladeenergie Monat
+    source: sensor.enyaq_ladeenergie_bezahlt_gesamt
+    cycle: monthly

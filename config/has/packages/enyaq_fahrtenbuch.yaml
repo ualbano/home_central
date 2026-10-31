@@ -1,0 +1,249 @@
+# ═══════════════════════════════════════════════════════════════
+#  ENYAQ FAHRTENBUCH  –  Home-Assistant-Paket
+# ═══════════════════════════════════════════════════════════════
+#
+#  Wird über "homeassistant: packages" in configuration.yaml geladen.
+#  CSV-Export: File-Integration → "Benachrichtigungsdienst in Datei",
+#  Pfad /config/fahrtenbuch.csv, Zeitstempel AUS, Entitäts-ID der neuen
+#  notify-Entität auf  notify.fahrtenbuch_csv  umbenennen. Danach einmalig
+#  das Skript "Enyaq Fahrtenbuch: CSV-Kopfzeile schreiben" ausführen.
+#
+#  SO FUNKTIONIERT'S
+#  • Das Fahrtenbuch merkt sich Kilometerstand, Akku und Adresse beim Parken.
+#  • Meldet das Auto danach geparkt mit höherem Kilometerstand, wird eine Fahrt
+#    eingetragen: km, Akku vorher/nachher, kWh, kWh/100 km.
+#  • Laden zwischen zwei Fahrten wird erkannt (Akkustart wird angehoben).
+#  • Steigt der Akku während einer Fahrt (Schnellladestopp), wird die Fahrt als
+#    "mit Ladestopp" markiert und fließt nicht in den Verbrauch ein.
+#  • Standverluste und Vorklimatisieren zählen zur nächsten Fahrt.
+#  • Kosten kommen aus dem Ladelog (enyaq_ladelog.yaml): Ø bezahlter kWh-Preis.
+# ═══════════════════════════════════════════════════════════════
+
+input_number:
+  enyaq_akku_netto:
+    name: Enyaq nutzbare Akkukapazität
+    icon: mdi:battery-high
+    min: 50
+    max: 90
+    step: 0.5
+    initial: 77            # Enyaq 85x (2025): 77 kWh netto
+    unit_of_measurement: kWh
+    mode: box
+
+# ─────────────────────────── Fahrt erkennen ───────────────────────────
+automation:
+  - id: enyaq_fahrtenbuch_fahrt_erfassen
+    alias: "Enyaq Fahrtenbuch: Fahrt erfassen"
+    description: Trägt eine Fahrt ein, sobald das Auto geparkt mit höherem Kilometerstand meldet.
+    mode: single
+    max_exceeded: silent
+    triggers:
+      - trigger: state
+        entity_id: sensor.enyaq_mileage
+        not_to: [unknown, unavailable]
+      - trigger: state
+        entity_id: sensor.enyaq_parking_state
+        to: PARKED
+    conditions:
+      - condition: state
+        entity_id: sensor.enyaq_parking_state
+        state: PARKED
+    actions:
+      # kurz warten, bis alle Sensoren desselben Abrufs aktualisiert sind
+      - delay: "00:00:30"
+      - variables:
+          cap: "{{ states('input_number.enyaq_akku_netto') | float(77) }}"
+          km_now: "{{ states('sensor.enyaq_mileage') | float(-1) }}"
+          soc_now: "{{ states('sensor.enyaq_battery_level') | float(-1) }}"
+          s_km: "{{ state_attr('sensor.enyaq_fahrtenbuch', 'start_km') }}"
+          s_soc: "{{ state_attr('sensor.enyaq_fahrtenbuch', 'start_soc') }}"
+          s_addr: "{{ state_attr('sensor.enyaq_fahrtenbuch', 'start_address') or '?' }}"
+          addr: >-
+            {% set a = states('sensor.enyaq_address') %}
+            {{ a if a not in ['unknown', 'unavailable'] else '?' }}
+      - condition: template
+        value_template: >-
+          {{ s_km is number and s_soc is number and soc_now >= 0 and km_now > s_km }}
+      - variables:
+          km: "{{ (km_now - s_km) | round(0) | int }}"
+          dsoc: "{{ s_soc - soc_now }}"
+      - variables:
+          ladestopp: "{{ dsoc < 0 }}"
+          kwh: "{{ (dsoc / 100 * cap) | round(2) if dsoc >= 0 else none }}"
+      - variables:
+          kwh_100: "{{ (kwh / km * 100) | round(1) if kwh is number and km >= 5 else none }}"
+      - event: enyaq_trip_end
+        event_data:
+          datum: "{{ now().isoformat() }}"
+          von: "{{ s_addr }}"
+          nach: "{{ addr }}"
+          km: "{{ km }}"
+          km_start: "{{ s_km | int }}"
+          km_ende: "{{ km_now | int }}"
+          soc_start: "{{ s_soc | int }}"
+          soc_ende: "{{ soc_now | int }}"
+          kwh: "{{ kwh }}"
+          kwh_100: "{{ kwh_100 }}"
+          ladestopp: "{{ ladestopp }}"
+      # CSV-Zeile für Excel (Semikolon, Dezimalkomma)
+      - action: notify.send_message
+        continue_on_error: true
+        target:
+          entity_id: notify.fahrtenbuch_csv
+        data:
+          message: >-
+            {%- macro n(x) -%}{{ ('%.1f' % x) | replace('.', ',') if x is number else '' }}{%- endmacro -%}
+            {{ now().strftime('%d.%m.%Y') }};{{ now().strftime('%H:%M') }};{{ s_addr | replace(';', ',') }};{{ addr | replace(';', ',') }};{{ s_km | int }};{{ km_now | int }};{{ km }};{{ s_soc | int }};{{ soc_now | int }};{{ n(kwh) }};{{ n(kwh_100) }};{{ 'ja' if ladestopp else 'nein' }}
+
+# ─────────────────────────── Skripte ───────────────────────────
+script:
+  enyaq_fahrtenbuch_csv_kopfzeile:
+    alias: "Enyaq Fahrtenbuch: CSV-Kopfzeile schreiben"
+    icon: mdi:table-headers-eye
+    sequence:
+      - action: notify.send_message
+        target:
+          entity_id: notify.fahrtenbuch_csv
+        data:
+          message: "Datum;Uhrzeit;Von;Nach;km Start;km Ende;km;Akku Start %;Akku Ende %;kWh;kWh/100 km;Ladestopp"
+
+  enyaq_fahrtenbuch_zuruecksetzen:
+    alias: "Enyaq Fahrtenbuch: Liste leeren"
+    icon: mdi:notebook-remove-outline
+    sequence:
+      - event: enyaq_fahrtenbuch_reset
+
+# ─────────────────────────── Sensoren ───────────────────────────
+template:
+  # Fahrtenbuch: Zustand = Ø Verbrauch der gespeicherten Fahrten,
+  # Attribut "trips" = die letzten 30 Fahrten (überlebt Neustarts)
+  - triggers:
+      - trigger: event
+        event_type: enyaq_trip_end
+        id: trip
+      - trigger: state
+        entity_id: sensor.enyaq_battery_level
+        id: soc
+      - trigger: homeassistant
+        event: start
+        id: start
+      - trigger: event
+        event_type: enyaq_fahrtenbuch_reset
+        id: reset
+    actions:
+      - variables:
+          km_now: "{{ states('sensor.enyaq_mileage') | float(-1) }}"
+          soc_now: "{{ states('sensor.enyaq_battery_level') | float(-1) }}"
+          addr_now: "{{ states('sensor.enyaq_address') }}"
+          old_trips: "{{ [] if trigger.id == 'reset' else (this.attributes.trips | default([])) }}"
+          s_km: "{{ this.attributes.start_km | default(none) }}"
+          s_soc: "{{ this.attributes.start_soc | default(none) }}"
+          s_addr: "{{ this.attributes.start_address | default(none) }}"
+      - variables:
+          reinit: "{{ trigger.id in ['trip', 'reset'] or s_km is not number or s_soc is not number }}"
+          new_trips: >-
+            {% if trigger.id == 'trip' %}{{ ([dict(trigger.event.data)] + old_trips)[:30] }}
+            {% else %}{{ old_trips }}{% endif %}
+      - variables:
+          n_km: "{{ km_now if (reinit and km_now >= 0) else s_km }}"
+          n_soc: >-
+            {% if reinit and soc_now >= 0 %}{{ soc_now }}
+            {% elif trigger.id == 'soc' and s_soc is number and soc_now > s_soc and km_now == s_km %}{{ soc_now }}
+            {% else %}{{ s_soc }}{% endif %}
+          n_addr: >-
+            {% if (reinit or s_addr is none) and addr_now not in ['unknown', 'unavailable'] %}{{ addr_now }}
+            {% else %}{{ s_addr }}{% endif %}
+    sensor:
+      - name: Enyaq Fahrtenbuch
+        unique_id: enyaq_fahrtenbuch
+        icon: mdi:notebook-outline
+        unit_of_measurement: kWh/100 km
+        state: >-
+          {% set v = new_trips | rejectattr('kwh', 'none') | list %}
+          {% set km = v | sum(attribute='km') %}
+          {{ ((v | sum(attribute='kwh')) / km * 100) | round(1) if km > 0 else none }}
+        attributes:
+          trips: "{{ new_trips }}"
+          start_km: "{{ n_km }}"
+          start_soc: "{{ n_soc }}"
+          start_address: "{{ n_addr }}"
+
+  # Summenzähler (nur Fahrten mit gültigem Verbrauch) – Basis für Monatswerte
+  - triggers:
+      - trigger: event
+        event_type: enyaq_trip_end
+    sensor:
+      - name: Enyaq Fahrenergie gemessen
+        unique_id: enyaq_fahrenergie_gemessen
+        icon: mdi:battery-minus-variant
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        state: >-
+          {% set d = trigger.event.data %}
+          {% set prev = this.state | float(0) %}
+          {{ (prev + d.kwh) | round(2) if d.kwh is number else prev }}
+      - name: Enyaq Fahrstrecke gemessen
+        unique_id: enyaq_fahrstrecke_gemessen
+        icon: mdi:map-marker-distance
+        unit_of_measurement: km
+        device_class: distance
+        state_class: total_increasing
+        state: >-
+          {% set d = trigger.event.data %}
+          {% set prev = this.state | float(0) %}
+          {{ prev + d.km if d.kwh is number else prev }}
+
+  # Monatsauswertung
+  - sensor:
+      - name: Enyaq Verbrauch Monat
+        unique_id: enyaq_verbrauch_monat
+        icon: mdi:speedometer
+        unit_of_measurement: kWh/100 km
+        state_class: measurement
+        state: >-
+          {% set e = states('sensor.enyaq_energie_monat') | float(0) %}
+          {% set k = states('sensor.enyaq_strecke_gemessen_monat') | float(0) %}
+          {{ (e / k * 100) | round(1) if k > 0 else none }}
+      - name: Enyaq Fahrkosten Monat
+        unique_id: enyaq_fahrkosten_monat
+        icon: mdi:cash
+        unit_of_measurement: €
+        state_class: measurement
+        # Energie ab Akku (Fahrten ohne Messung hochgerechnet) × Ladeverlust × Ø Ladepreis
+        state: >-
+          {% set e = states('sensor.enyaq_energie_monat') | float(0) %}
+          {% set km_alle = states('sensor.enyaq_km_monat') | float(0) %}
+          {% set km_gem = states('sensor.enyaq_strecke_gemessen_monat') | float(0) %}
+          {% set e_ges = e * (km_alle / km_gem) if km_gem > 0 and km_alle > km_gem else e %}
+          {% set verlust = states('input_number.enyaq_ladeverlust') | float(10) %}
+          {% set preis = states('sensor.enyaq_ladelog') | float(-1) %}
+          {{ (e_ges * (1 + verlust / 100) * preis) | round(2) if preis >= 0 else none }}
+      - name: Enyaq Kosten pro 100 km
+        unique_id: enyaq_kosten_pro_100_km
+        icon: mdi:cash-marker
+        unit_of_measurement: €/100 km
+        state_class: measurement
+        state: >-
+          {% set v = states('sensor.enyaq_fahrtenbuch') | float(-1) %}
+          {% set verlust = states('input_number.enyaq_ladeverlust') | float(10) %}
+          {% set preis = states('sensor.enyaq_ladelog') | float(-1) %}
+          {{ (v * (1 + verlust / 100) * preis) | round(2) if v >= 0 and preis >= 0 else none }}
+
+utility_meter:
+  enyaq_km_monat:
+    name: Enyaq km Monat
+    source: sensor.enyaq_mileage
+    cycle: monthly
+  enyaq_km_jahr:
+    name: Enyaq km Jahr
+    source: sensor.enyaq_mileage
+    cycle: yearly
+  enyaq_energie_monat:
+    name: Enyaq Energie Monat
+    source: sensor.enyaq_fahrenergie_gemessen
+    cycle: monthly
+  enyaq_strecke_gemessen_monat:
+    name: Enyaq Strecke gemessen Monat
+    source: sensor.enyaq_fahrstrecke_gemessen
+    cycle: monthly

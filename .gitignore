@@ -3,3 +3,5 @@
 docker-compose.override.yml
 data/
 log/
+# Personal exports of the car logbook (trips with addresses, charging costs)
+config/has/*.csv

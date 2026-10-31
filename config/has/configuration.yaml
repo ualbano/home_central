@@ -10,6 +10,23 @@ homeassistant:
   external_url: https://home.albano.xyz:443
   auth_providers:
     - type: homeassistant
+  # Packages bundle everything for one topic (helpers, automations, sensors)
+  # in a single file, e.g. the logbook of the car.
+  packages: !include_dir_named packages
+  # The File integration may only write into allowed directories
+  # (CSV exports of the car logbook).
+  allowlist_external_dirs:
+    - /config
+
+# Dashboards maintained in this repo (YAML mode, not editable in the UI).
+lovelace:
+  dashboards:
+    dashboard-enyaq:
+      mode: yaml
+      title: Enyaq
+      icon: mdi:car-electric
+      show_in_sidebar: true
+      filename: dashboards/enyaq.yaml
 
 automation: !include automations.yaml
 script: !include scripts.yaml

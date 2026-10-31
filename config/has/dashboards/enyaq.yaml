@@ -1,0 +1,700 @@
+# ═══════════════════════════════════════════════════════════════
+#  ŠKODA ENYAQ DASHBOARD  –  Škoda API Connect
+# ═══════════════════════════════════════════════════════════════
+#  YAML-Dashboard – wird über "lovelace: dashboards" in configuration.yaml
+#  geladen. Änderungen hier im Repo machen, nicht im UI-Editor.
+#
+#  Benötigt (HACS → Frontend):
+#    • Mushroom          • Lovelace Card Mod          • ApexCharts Card
+#  Daten für die Seite "Fahrtenbuch": packages/enyaq_fahrtenbuch.yaml + enyaq_ladelog.yaml
+#
+#  Optional: Frost-Hinweis nutzt sensor.dwd_temperature – ersetze das durch
+#  deinen DWD-Temperatursensor, sonst bleibt der Chip einfach unsichtbar.
+# ═══════════════════════════════════════════════════════════════
+
+title: Enyaq
+views:
+  - title: Enyaq
+    path: enyaq
+    icon: mdi:car-electric
+    type: sections
+    max_columns: 3
+    sections:
+
+      # ─────────────────────────── HERO ───────────────────────────
+      - type: grid
+        cards:
+          - type: custom:mushroom-template-card
+            primary: Enyaq
+            secondary: >-
+              {% set t = as_datetime(states('sensor.enyaq_last_vehicle_data')) %}
+              {% if t %}{% set m = ((now() - t).total_seconds() // 60)|int %}
+              Daten vom Auto: {{ 'gerade eben' if m < 1 else 'vor ' ~ m ~ ' min' if m < 60
+                 else 'vor ' ~ (m // 60) ~ ' h' if m < 1440 else 'vor ' ~ (m // 1440) ~ ' Tagen' }}
+              {% else %}Keine Daten{% endif %}
+            icon: mdi:car-electric
+            icon_color: green
+            tap_action:
+              action: none
+            hold_action:
+              action: perform-action
+              perform_action: button.press
+              target:
+                entity_id: button.enyaq_poll_api_now
+            grid_options:
+              columns: full
+            card_mod:
+              style: |
+                ha-card {
+                  background:
+                    radial-gradient(circle at 15% 50%, rgba(78,169,46,.35) 0%, transparent 55%),
+                    linear-gradient(135deg, rgba(14,58,47,.55) 0%, transparent 70%),
+                    var(--ha-card-background, var(--card-background-color));
+                  --card-primary-font-size: 26px;
+                  --card-primary-font-weight: 800;
+                  --card-secondary-font-size: 12px;
+                  padding: 8px 4px;
+                }
+
+          - type: custom:mushroom-chips-card
+            alignment: center
+            chips:
+              # Verriegelung
+              - type: template
+                entity: sensor.enyaq_reliable_lock_status
+                icon: >-
+                  {{ 'mdi:lock' if states(entity) == 'LOCKED' else 'mdi:lock-open-variant' }}
+                icon_color: >-
+                  {{ 'green' if states(entity) == 'LOCKED' else 'red' }}
+                content: >-
+                  {{ 'Zu' if states(entity) == 'LOCKED' else 'Offen' }}
+              # Kabel
+              - type: template
+                entity: binary_sensor.enyaq_charging_cable
+                icon: >-
+                  {{ 'mdi:ev-plug-type2' if is_state(entity, 'on') else 'mdi:power-plug-off-outline' }}
+                icon_color: >-
+                  {{ 'blue' if is_state(entity, 'on') else 'grey' }}
+                content: >-
+                  {{ 'Kabel' if is_state(entity, 'on') else 'Kein Kabel' }}
+              # Kilometerstand
+              - type: template
+                entity: sensor.enyaq_mileage
+                icon: mdi:counter
+                icon_color: grey
+                content: >-
+                  {{ '{:,.0f}'.format(states(entity)|float(0)).replace(',', '.') }} km
+              # Auto wecken (lang drücken)
+              - type: template
+                icon: mdi:alarm
+                icon_color: deep-orange
+                content: Wecken
+                tap_action:
+                  action: none
+                hold_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.enyaq_wake_vehicle
+              # Warnung: ungesichert geparkt
+              - type: conditional
+                conditions:
+                  - condition: state
+                    entity: binary_sensor.enyaq_parked_unsecured
+                    state: "on"
+                chip:
+                  type: template
+                  icon: mdi:shield-alert
+                  icon_color: red
+                  content: Ungesichert!
+                  tap_action:
+                    action: more-info
+                    entity: binary_sensor.enyaq_parked_unsecured
+              # Frost-Hinweis
+              - type: conditional
+                conditions:
+                  - condition: numeric_state
+                    entity: sensor.dwd_temperature
+                    below: 3
+                chip:
+                  type: template
+                  icon: mdi:snowflake-alert
+                  icon_color: light-blue
+                  content: Frost – vorheizen?
+                  tap_action:
+                    action: more-info
+                    entity: climate.enyaq_air_conditioning
+
+          # Akku: Hintergrund füllt sich wie ein Akkubalken
+          - type: custom:mushroom-template-card
+            entity: sensor.enyaq_battery_level
+            primary: >-
+              {{ states('sensor.enyaq_battery_level')|int(0) }} %  ·  {{ states('sensor.enyaq_battery_range')|int(0) }} km
+            secondary: >-
+              Akku · Limit {{ states('number.enyaq_charge_limit')|int(0) }} %
+            icon: >-
+              {% set s = states(entity)|int(0) %}
+              {% if is_state('binary_sensor.enyaq_charging', 'on') %}mdi:battery-charging-{{ [((s // 10) * 10), 10]|max if s < 100 else 100 }}
+              {% elif s >= 95 %}mdi:battery
+              {% elif s < 10 %}mdi:battery-alert-variant-outline
+              {% else %}mdi:battery-{{ (s // 10) * 10 }}{% endif %}
+            icon_color: >-
+              {% set s = states(entity)|int(0) %}
+              {{ 'red' if s < 20 else 'orange' if s < 40 else 'green' }}
+            grid_options:
+              columns: full
+            card_mod:
+              style: |
+                ha-card {
+                  {% set s = states('sensor.enyaq_battery_level')|float(0) %}
+                  {% set lim = states('number.enyaq_charge_limit')|float(100) %}
+                  {% set c = '229,57,53' if s < 20 else '251,140,0' if s < 40 else '67,160,71' %}
+                  background:
+                    linear-gradient(90deg,
+                      transparent calc({{lim}}% - 1px), rgba(255,255,255,.35) calc({{lim}}% - 1px),
+                      rgba(255,255,255,.35) {{lim}}%, transparent {{lim}}%),
+                    linear-gradient(90deg,
+                      rgba({{c}},.38) 0%, rgba({{c}},.38) {{s}}%,
+                      var(--ha-card-background, var(--card-background-color)) {{s}}%);
+                  --card-primary-font-size: 22px;
+                  --card-primary-font-weight: 700;
+                }
+
+      # ─────────────────────────── STANDORT ───────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Standort
+            icon: mdi:map-marker
+
+          - type: custom:mushroom-template-card
+            entity: device_tracker.enyaq_location
+            primary: >-
+              {% set s = states(entity) %}
+              {% set p = 'Geparkt' if is_state('sensor.enyaq_parking_state', 'PARKED') else 'Unterwegs' %}
+              {{ 'Zuhause' if s == 'home' else p ~ ' in ' ~ s if s not in ['not_home','unknown','unavailable'] else p }}
+            secondary: "{{ states('sensor.enyaq_address') }}"
+            icon: >-
+              {% if is_state(entity, 'home') %}mdi:home-lightning-bolt
+              {% elif is_state('sensor.enyaq_parking_state', 'PARKED') %}mdi:parking
+              {% else %}mdi:car-arrow-right{% endif %}
+            icon_color: "{{ 'green' if is_state(entity, 'home') else 'blue' }}"
+            multiline_secondary: true
+            tap_action:
+              action: more-info
+            grid_options:
+              columns: full
+
+          - type: map
+            entities:
+              - entity: device_tracker.enyaq_location
+            hours_to_show: 48
+            default_zoom: 15
+            theme_mode: auto
+            aspect_ratio: "4:3"
+            grid_options:
+              columns: full
+
+      # ─────────────────────────── LADEN ───────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Laden
+            icon: mdi:ev-station
+
+          # Status – glüht grün während des Ladens
+          - type: custom:mushroom-template-card
+            entity: binary_sensor.enyaq_charging
+            primary: >-
+              {% set soc = states('sensor.enyaq_battery_level')|int(0) %}
+              {% set lim = states('number.enyaq_charge_limit')|int(100) %}
+              {% if is_state('binary_sensor.enyaq_charging', 'on') %}Lädt
+              {% elif is_state('binary_sensor.enyaq_charging_cable', 'on') and soc >= lim %}Vollgeladen
+              {% elif is_state('binary_sensor.enyaq_charging_cable', 'on') %}Eingesteckt – lädt nicht
+              {% else %}Kein Kabel eingesteckt{% endif %}
+            secondary: >-
+              {% if is_state('binary_sensor.enyaq_charging', 'on') %}
+                {% set t = states('sensor.enyaq_remaining_charging_time')|int(0) %}
+                {{ states('sensor.enyaq_charging_power')|float(0)|round(1) }} kW
+                {%- set r = states('sensor.enyaq_charging_rate') %}{% if r not in ['unknown','unavailable'] %} · +{{ r|int }} km/h{% endif %}
+                · noch {{ t // 60 }}:{{ '%02d' % (t % 60) }} h · fertig {{ (now() + timedelta(minutes=t)).strftime('%H:%M') }}
+              {% elif is_state('binary_sensor.enyaq_charging_cable', 'on') %}
+                Stecker {{ 'entriegelt' if is_state('binary_sensor.enyaq_charging_cable_lock', 'on') else 'verriegelt' }}
+                {%- if is_state('binary_sensor.enyaq_at_saved_charging_location', 'on') %} · an gespeichertem Ladeort{% endif %}
+              {% else %}
+                Ziel {{ states('number.enyaq_charge_limit')|int(0) }} % · Modus {{ states('select.enyaq_charge_mode')|title }}
+              {% endif %}
+            icon: >-
+              {% if is_state('binary_sensor.enyaq_charging', 'on') %}mdi:battery-charging-high
+              {% elif is_state('binary_sensor.enyaq_charging_cable', 'on') %}mdi:ev-plug-type2
+              {% else %}mdi:power-plug-off-outline{% endif %}
+            icon_color: >-
+              {% if is_state('binary_sensor.enyaq_charging', 'on') %}green
+              {% elif is_state('binary_sensor.enyaq_charging_cable', 'on') %}blue
+              {% else %}grey{% endif %}
+            multiline_secondary: true
+            grid_options:
+              columns: full
+            card_mod:
+              style: |
+                {% if is_state('binary_sensor.enyaq_charging', 'on') %}
+                ha-card { animation: glow 2.5s ease-in-out infinite; }
+                @keyframes glow {
+                  0%,100% { box-shadow: 0 0 0 0 rgba(67,160,71,0); }
+                  50%     { box-shadow: 0 0 18px 2px rgba(67,160,71,.6); }
+                }
+                {% endif %}
+
+          - type: tile
+            entity: switch.enyaq_charging
+            name: Laden
+            visibility:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity: binary_sensor.enyaq_charging_cable
+                    state: "on"
+                  - condition: state
+                    entity: binary_sensor.enyaq_charging
+                    state: "on"
+            icon: mdi:lightning-bolt
+            color: green
+            grid_options:
+              columns: 6
+
+          - type: tile
+            entity: sensor.enyaq_charging_power
+            name: Leistung
+            visibility:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity: binary_sensor.enyaq_charging_cable
+                    state: "on"
+                  - condition: state
+                    entity: binary_sensor.enyaq_charging
+                    state: "on"
+            icon: mdi:flash
+            color: amber
+            grid_options:
+              columns: 6
+
+          - type: custom:mushroom-number-card
+            entity: number.enyaq_charge_limit
+            name: Ladelimit
+            visibility:
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity: binary_sensor.enyaq_charging_cable
+                    state: "on"
+                  - condition: state
+                    entity: binary_sensor.enyaq_charging
+                    state: "on"
+            icon: mdi:battery-arrow-up
+            icon_color: green
+            display_mode: slider
+            grid_options:
+              columns: full
+
+          - type: custom:apexcharts-card
+            graph_span: 7d
+            header:
+              show: true
+              title: Akku & Reichweite · 7 Tage
+            apex_config:
+              chart:
+                height: 200
+              grid:
+                borderColor: rgba(127,127,127,.15)
+            yaxis:
+              - id: soc
+                min: 0
+                max: 100
+                decimals: 0
+                apex_config:
+                  tickAmount: 4
+              - id: range
+                opposite: true
+                min: 0
+                decimals: 0
+                apex_config:
+                  tickAmount: 4
+            series:
+              - entity: sensor.enyaq_battery_level
+                name: Akku %
+                yaxis_id: soc
+                type: area
+                curve: stepline
+                color: "#43a047"
+                opacity: 0.25
+                stroke_width: 2
+                group_by:
+                  func: last
+                  duration: 30min
+              - entity: sensor.enyaq_battery_range
+                name: Reichweite km
+                yaxis_id: range
+                type: line
+                curve: stepline
+                color: "#1e88e5"
+                stroke_width: 2
+                group_by:
+                  func: last
+                  duration: 30min
+            grid_options:
+              columns: full
+
+      # ─────────────────────────── KLIMA ───────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Klima
+            icon: mdi:fan
+
+          - type: thermostat
+            entity: climate.enyaq_air_conditioning
+            name: Klimatisierung
+            features:
+              - type: climate-hvac-modes
+            grid_options:
+              columns: full
+
+
+      # ──────────────────────── FAHRZEUGSTATUS ────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Fahrzeug
+            icon: mdi:car-door
+
+          - type: custom:mushroom-template-card
+            entity: sensor.enyaq_reliable_lock_status
+            primary: Verriegelung
+            secondary: "{{ 'Verriegelt' if states(entity) == 'LOCKED' else 'Entriegelt' }}"
+            icon: "{{ 'mdi:lock' if states(entity) == 'LOCKED' else 'mdi:lock-open-variant' }}"
+            icon_color: "{{ 'green' if states(entity) == 'LOCKED' else 'red' }}"
+            grid_options:
+              columns: 6
+
+          - type: custom:mushroom-template-card
+            entity: binary_sensor.enyaq_doors
+            primary: Türen
+            secondary: "{{ 'Offen' if is_state(entity, 'on') else 'Geschlossen' }}"
+            icon: "{{ 'mdi:car-door-lock-open' if is_state(entity, 'on') else 'mdi:car-door' }}"
+            icon_color: "{{ 'red' if is_state(entity, 'on') else 'green' }}"
+            grid_options:
+              columns: 6
+
+          - type: custom:mushroom-template-card
+            entity: binary_sensor.enyaq_windows
+            primary: Fenster
+            secondary: "{{ 'Offen' if is_state(entity, 'on') else 'Geschlossen' }}"
+            icon: "{{ 'mdi:window-open-variant' if is_state(entity, 'on') else 'mdi:car-windshield' }}"
+            icon_color: "{{ 'orange' if is_state(entity, 'on') else 'green' }}"
+            grid_options:
+              columns: 6
+
+          - type: custom:mushroom-template-card
+            entity: binary_sensor.enyaq_trunk
+            primary: Kofferraum
+            secondary: "{{ 'Offen' if is_state(entity, 'on') else 'Geschlossen' }}"
+            icon: mdi:car-back
+            icon_color: "{{ 'red' if is_state(entity, 'on') else 'green' }}"
+            grid_options:
+              columns: 6
+
+          - type: custom:mushroom-template-card
+            entity: binary_sensor.enyaq_bonnet
+            primary: Motorhaube
+            secondary: "{{ 'Offen' if is_state(entity, 'on') else 'Geschlossen' }}"
+            icon: mdi:car-select
+            icon_color: "{{ 'red' if is_state(entity, 'on') else 'green' }}"
+            grid_options:
+              columns: 6
+
+          - type: custom:mushroom-template-card
+            entity: binary_sensor.enyaq_lights
+            primary: Licht
+            secondary: "{{ 'An' if is_state(entity, 'on') else 'Aus' }}"
+            icon: "{{ 'mdi:car-light-high' if is_state(entity, 'on') else 'mdi:car-light-dimmed' }}"
+            icon_color: "{{ 'amber' if is_state(entity, 'on') else 'grey' }}"
+            grid_options:
+              columns: 6
+
+      # ─────────────────────────── SYSTEM ───────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Verbindung
+            icon: mdi:cloud-sync
+            heading_style: subtitle
+
+          - type: custom:mushroom-template-card
+            entity: sensor.enyaq_api_status
+            primary: >-
+              API {{ 'OK' if states(entity) == 'ok' else states(entity) }}
+            secondary: >-
+              {% set t = as_datetime(states('sensor.enyaq_last_api_poll')) %}
+              {{ states('sensor.enyaq_api_requests_remaining') }} Anfragen übrig
+              {%- if t %} · Abruf {{ as_local(t).strftime('%H:%M') }}{% endif %}
+              · alle {{ states('sensor.enyaq_current_polling_interval') }} min
+            icon: mdi:api
+            icon_color: >-
+              {% set r = states('sensor.enyaq_api_requests_remaining')|int(99) %}
+              {{ 'red' if states(entity) != 'ok' else 'orange' if r < 5 else 'green' }}
+            hold_action:
+              action: perform-action
+              perform_action: button.press
+              target:
+                entity_id: button.enyaq_poll_api_now
+            grid_options:
+              columns: full
+
+          - type: tile
+            entity: switch.enyaq_fast_polling_while_plugged_in
+            name: Schnell-Abfrage am Kabel
+            icon: mdi:timer-sync
+            grid_options:
+              columns: full
+
+  # ═══════════════════════════ FAHRTENBUCH ═══════════════════════════
+  - title: Fahrtenbuch
+    path: fahrtenbuch
+    icon: mdi:notebook-outline
+    type: sections
+    max_columns: 3
+    sections:
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Dieser Monat
+            icon: mdi:calendar-month
+
+          - type: tile
+            entity: sensor.enyaq_km_monat
+            name: Gefahren
+            icon: mdi:road-variant
+            color: blue
+            grid_options:
+              columns: 6
+
+          - type: tile
+            entity: sensor.enyaq_verbrauch_monat
+            name: Ø Verbrauch
+            icon: mdi:speedometer
+            color: green
+            grid_options:
+              columns: 6
+
+          - type: tile
+            entity: sensor.enyaq_energie_monat
+            name: Energie ab Akku
+            icon: mdi:battery-minus-variant
+            color: amber
+            grid_options:
+              columns: 6
+
+          - type: tile
+            entity: sensor.enyaq_fahrkosten_monat
+            name: Fahrkosten
+            icon: mdi:cash
+            color: deep-orange
+            grid_options:
+              columns: 6
+
+          - type: custom:mushroom-template-card
+            entity: sensor.enyaq_fahrtenbuch
+            primary: >-
+              {% set v = states('sensor.enyaq_fahrtenbuch') %}
+              Ø {{ v | replace('.', ',') if v not in ['unknown','unavailable'] else '–' }} kWh/100 km
+            secondary: >-
+              {% set t = state_attr('sensor.enyaq_fahrtenbuch', 'trips') or [] %}
+              über die letzten {{ t | count }} Fahrten ·
+              {{ '{:,.0f}'.format(states('sensor.enyaq_km_jahr') | float(0)).replace(',', '.') }} km dieses Jahr
+            icon: mdi:chart-bell-curve-cumulative
+            icon_color: green
+            grid_options:
+              columns: full
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Auswertung
+            icon: mdi:chart-bar
+
+          - type: custom:apexcharts-card
+            graph_span: 30d
+            header:
+              show: true
+              title: kWh/100 km pro Fahrt · 30 Tage
+            apex_config:
+              chart:
+                height: 200
+              grid:
+                borderColor: rgba(127,127,127,.15)
+            yaxis:
+              - min: 0
+                decimals: 0
+            series:
+              - entity: sensor.enyaq_fahrtenbuch
+                name: kWh/100 km
+                type: column
+                color: "#43a047"
+                data_generator: |
+                  const trips = entity.attributes.trips || [];
+                  return trips
+                    .filter(t => typeof t.kwh_100 === 'number')
+                    .map(t => [new Date(t.datum).getTime(), t.kwh_100]);
+            grid_options:
+              columns: full
+
+          - type: custom:apexcharts-card
+            graph_span: 10d
+            span:
+              end: day
+            header:
+              show: true
+              title: km pro Tag
+            apex_config:
+              chart:
+                height: 180
+              grid:
+                borderColor: rgba(127,127,127,.15)
+            yaxis:
+              - min: 0
+                decimals: 0
+            series:
+              - entity: sensor.enyaq_mileage
+                name: km
+                type: column
+                color: "#1e88e5"
+                group_by:
+                  func: diff
+                  duration: 1d
+            grid_options:
+              columns: full
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Letzte Fahrten
+            icon: mdi:format-list-bulleted
+
+          - type: markdown
+            content: |
+              {% set trips = state_attr('sensor.enyaq_fahrtenbuch', 'trips') or [] %}
+              {% set tage = ['Mo','Di','Mi','Do','Fr','Sa','So'] %}
+              {% if trips | count == 0 %}
+              Noch keine Fahrten erfasst. Die erste erscheint, sobald das Auto nach einer Fahrt geparkt meldet.
+              {% endif %}
+              {% for t in trips[:15] %}
+              {% set d = as_local(as_datetime(t.datum)) %}
+              **{{ tage[d.weekday()] }} {{ d.strftime('%d.%m. %H:%M') }}** · {{ t.km }} km ·
+              {% if t.ladestopp %}⚡ mit Ladestopp
+              {% elif t.kwh_100 is number %}{{ ('%.1f' % t.kwh_100) | replace('.', ',') }} kWh/100 km
+              {% else %}Akku {{ t.soc_start }} → {{ t.soc_ende }} %{% endif %}
+
+              <small>{{ (t.von or '?').split(',')[0] }} → {{ (t.nach or '?').split(',')[0] }}</small>
+              {% if not loop.last %}<hr>{% endif %}
+              {% endfor %}
+            grid_options:
+              columns: full
+
+      # ─────────────────────────── LADUNGEN ───────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Laden & Kosten
+            icon: mdi:ev-station
+
+          - type: tile
+            entity: sensor.enyaq_ladekosten_monat
+            name: Geladen für (Monat)
+            icon: mdi:cash-multiple
+            color: deep-orange
+            grid_options:
+              columns: 6
+
+          - type: tile
+            entity: sensor.enyaq_ladelog
+            name: Ø Ladepreis
+            icon: mdi:currency-eur
+            color: amber
+            grid_options:
+              columns: 6
+
+          - type: tile
+            entity: sensor.enyaq_kosten_pro_100_km
+            name: Kosten / 100 km
+            icon: mdi:cash-marker
+            color: green
+            grid_options:
+              columns: 6
+
+          - type: tile
+            entity: sensor.enyaq_ladeenergie_monat
+            name: Geladen (Monat)
+            icon: mdi:ev-plug-type2
+            color: blue
+            grid_options:
+              columns: 6
+
+          # Preis nachtragen – nur sichtbar, wenn eine Ladung noch keinen Preis hat
+          - type: custom:mushroom-template-card
+            entity: sensor.enyaq_ladelog
+            primary: Preis fehlt
+            secondary: >-
+              {%- set offen = (state_attr('sensor.enyaq_ladelog', 'ladungen') or [])
+                 | selectattr('preis', 'none') | list -%}
+              {%- if offen -%}{%- set l = offen[0] -%}
+              {{ as_local(as_datetime(l.ende)).strftime('%d.%m. %H:%M') }} ·
+              {{ (l.ort or '?').split(',')[0] }} · +{{ ('%.1f' % l.kwh) | replace('.', ',') }} kWh
+              {%- if offen | count > 1 %} · noch {{ offen | count - 1 }} weitere{% endif -%}
+              {%- endif -%}
+            icon: mdi:cash-remove
+            icon_color: orange
+            multiline_secondary: true
+            visibility:
+              - condition: state
+                entity: binary_sensor.enyaq_ladung_ohne_preis
+                state: "on"
+            grid_options:
+              columns: full
+
+          - type: entities
+            show_header_toggle: false
+            visibility:
+              - condition: state
+                entity: binary_sensor.enyaq_ladung_ohne_preis
+                state: "on"
+            entities:
+              - entity: input_number.enyaq_ladepreis_eingabe
+                name: €/kWh (über 3 = Gesamtbetrag)
+              - type: button
+                name: Für diese Ladung speichern
+                icon: mdi:content-save
+                action_name: Speichern
+                tap_action:
+                  action: perform-action
+                  perform_action: script.enyaq_ladepreis_nachtragen
+            grid_options:
+              columns: full
+
+          - type: markdown
+            content: |
+              {% set ladungen = state_attr('sensor.enyaq_ladelog', 'ladungen') or [] %}
+              {% if ladungen | count == 0 %}
+              Noch keine Ladungen erfasst. Die erste erscheint, sobald du nach dem Laden das Kabel ziehst.
+              {% endif %}
+              {% for l in ladungen[:10] %}
+              {% set d = as_local(as_datetime(l.ende)) %}
+              **{{ d.strftime('%d.%m. %H:%M') }}** · {{ l.soc_start }} → {{ l.soc_ende }} % · +{{ ('%.1f' % l.kwh) | replace('.', ',') }} kWh ·
+              {% if l.kosten is number %}**{{ ('%.2f' % l.kosten) | replace('.', ',') }} €** ({{ ('%.2f' % l.preis) | replace('.', ',') }} €/kWh){% else %}*Preis fehlt*{% endif %}
+
+              <small>{{ (l.ort or '?').split(',')[0] }}</small>
+              {% if not loop.last %}<hr>{% endif %}
+              {% endfor %}
+            grid_options:
+              columns: full

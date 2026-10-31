@@ -42,6 +42,23 @@ container is running in network mode host
 Home Assistant is available on port 8123. Over the WebUI you can configure it, 
 but some configurations can only be made in the configuration file, therefore this configuration is part of this repo.
 
+#### Škoda Enyaq
+
+The car is connected via the HACS integration *Škoda API Connect*.
+Everything around it lives in this repo:
+
+- `config/has/dashboards/enyaq.yaml` – dashboard (YAML mode) with battery,
+  charging, location, climate, doors and a logbook page.
+  Needs the HACS frontend cards Mushroom, Lovelace Card Mod and ApexCharts Card.
+- `config/has/packages/enyaq_fahrtenbuch.yaml` – logbook: detects trips by the
+  mileage, calculates consumption (kWh/100 km) and monthly statistics.
+- `config/has/packages/enyaq_ladelog.yaml` – charging log: after unplugging,
+  a push notification asks for the price per kWh, so the real costs are tracked.
+
+Both logs can append to CSV files (`config/has/fahrtenbuch.csv`,
+`config/has/ladelog.csv`) via the File integration. These files are personal
+and therefore ignored by git.
+
 ### Mosquito
 
 For some devices I need MQTT to connect them, therefore I added this MQTT

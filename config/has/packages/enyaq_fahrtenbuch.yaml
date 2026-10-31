@@ -40,6 +40,7 @@ automation:
     triggers:
       - trigger: state
         entity_id: sensor.enyaq_mileage
+        not_from: [unknown, unavailable]   # kein Lauf beim HA-Neustart
         not_to: [unknown, unavailable]
         id: km
       - trigger: state

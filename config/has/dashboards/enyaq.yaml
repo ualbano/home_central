@@ -594,7 +594,7 @@ views:
               **{{ tage[d.weekday()] }} {{ d.strftime('%d.%m. %H:%M') }}** · {{ t.km }} km ·
               {% if t.ladestopp %}⚡ mit Ladestopp
               {% elif t.kwh_100 is number %}{{ ('%.1f' % t.kwh_100) | replace('.', ',') }} kWh/100 km
-              {% else %}Akku {{ t.soc_start }} → {{ t.soc_ende }} %{% endif %}
+              {% elif t.soc_start is number %}Akku {{ t.soc_start }} → {{ t.soc_ende }} %{% else %}ohne Akkudaten{% endif %}
 
               <small>{{ (t.von or '?').split(',')[0] }} → {{ (t.nach or '?').split(',')[0] }}</small>
               {% if not loop.last %}<hr>{% endif %}

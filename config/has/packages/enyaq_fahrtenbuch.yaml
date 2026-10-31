@@ -41,9 +41,11 @@ automation:
       - trigger: state
         entity_id: sensor.enyaq_mileage
         not_to: [unknown, unavailable]
+        id: km
       - trigger: state
         entity_id: sensor.enyaq_parking_state
         to: PARKED
+        id: parked
     conditions:
       - condition: state
         entity_id: sensor.enyaq_parking_state
@@ -55,7 +57,12 @@ automation:
           cap: "{{ states('input_number.enyaq_akku_netto') | float(77) }}"
           km_now: "{{ states('sensor.enyaq_mileage') | float(-1) }}"
           soc_now: "{{ states('sensor.enyaq_battery_level') | float(-1) }}"
-          s_km: "{{ state_attr('sensor.enyaq_fahrtenbuch', 'start_km') }}"
+          # Fallback ohne gemerkte Startwerte: vorheriger Kilometerstand aus dem Trigger
+          s_km: >-
+            {%- set k = state_attr('sensor.enyaq_fahrtenbuch', 'start_km') -%}
+            {%- if k is number -%}{{ k }}
+            {%- elif trigger.id == 'km' and trigger.from_state is not none -%}{{ trigger.from_state.state | float(none) }}
+            {%- else -%}{{ none }}{%- endif -%}
           s_soc: "{{ state_attr('sensor.enyaq_fahrtenbuch', 'start_soc') }}"
           s_addr: "{{ state_attr('sensor.enyaq_fahrtenbuch', 'start_address') or '?' }}"
           addr: >-
@@ -63,13 +70,13 @@ automation:
             {{ a if a not in ['unknown', 'unavailable'] else '?' }}
       - condition: template
         value_template: >-
-          {{ s_km is number and s_soc is number and soc_now >= 0 and km_now > s_km }}
+          {{ s_km is number and km_now > s_km }}
       - variables:
           km: "{{ (km_now - s_km) | round(0) | int }}"
-          dsoc: "{{ s_soc - soc_now }}"
+          dsoc: "{{ s_soc - soc_now if s_soc is number and soc_now >= 0 else none }}"
       - variables:
-          ladestopp: "{{ dsoc < 0 }}"
-          kwh: "{{ (dsoc / 100 * cap) | round(2) if dsoc >= 0 else none }}"
+          ladestopp: "{{ dsoc is number and dsoc < 0 }}"
+          kwh: "{{ (dsoc / 100 * cap) | round(2) if dsoc is number and dsoc >= 0 else none }}"
       - variables:
           kwh_100: "{{ (kwh / km * 100) | round(1) if kwh is number and km >= 5 else none }}"
       - event: enyaq_trip_end
@@ -80,7 +87,7 @@ automation:
           km: "{{ km }}"
           km_start: "{{ s_km | int }}"
           km_ende: "{{ km_now | int }}"
-          soc_start: "{{ s_soc | int }}"
+          soc_start: "{{ s_soc | int if s_soc is number else none }}"
           soc_ende: "{{ soc_now | int }}"
           kwh: "{{ kwh }}"
           kwh_100: "{{ kwh_100 }}"
@@ -93,7 +100,7 @@ automation:
         data:
           message: >-
             {%- macro n(x) -%}{{ ('%.1f' % x) | replace('.', ',') if x is number else '' }}{%- endmacro -%}
-            {{ now().strftime('%d.%m.%Y') }};{{ now().strftime('%H:%M') }};{{ s_addr | replace(';', ',') }};{{ addr | replace(';', ',') }};{{ s_km | int }};{{ km_now | int }};{{ km }};{{ s_soc | int }};{{ soc_now | int }};{{ n(kwh) }};{{ n(kwh_100) }};{{ 'ja' if ladestopp else 'nein' }}
+            {{ now().strftime('%d.%m.%Y') }};{{ now().strftime('%H:%M') }};{{ s_addr | replace(';', ',') }};{{ addr | replace(';', ',') }};{{ s_km | int }};{{ km_now | int }};{{ km }};{{ s_soc | int if s_soc is number else '' }};{{ soc_now | int }};{{ n(kwh) }};{{ n(kwh_100) }};{{ 'ja' if ladestopp else 'nein' }}
 
 # ─────────────────────────── Skripte ───────────────────────────
 script:
@@ -127,6 +134,10 @@ template:
       - trigger: homeassistant
         event: start
         id: start
+      - trigger: state
+        entity_id: sensor.enyaq_mileage
+        from: [unknown, unavailable]
+        id: online
       - trigger: event
         event_type: enyaq_fahrtenbuch_reset
         id: reset
@@ -135,12 +146,15 @@ template:
           km_now: "{{ states('sensor.enyaq_mileage') | float(-1) }}"
           soc_now: "{{ states('sensor.enyaq_battery_level') | float(-1) }}"
           addr_now: "{{ states('sensor.enyaq_address') }}"
-          old_trips: "{{ [] if trigger.id == 'reset' else (this.attributes.trips | default([])) }}"
-          s_km: "{{ this.attributes.start_km | default(none) }}"
-          s_soc: "{{ this.attributes.start_soc | default(none) }}"
-          s_addr: "{{ this.attributes.start_address | default(none) }}"
+          # `this` ist im actions-Teil nicht verfügbar → alte Werte per state_attr lesen
+          old_trips: "{{ [] if trigger.id == 'reset' else (state_attr('sensor.enyaq_fahrtenbuch', 'trips') or []) }}"
+          s_km: "{{ state_attr('sensor.enyaq_fahrtenbuch', 'start_km') }}"
+          s_soc: "{{ state_attr('sensor.enyaq_fahrtenbuch', 'start_soc') }}"
+          s_addr: "{{ state_attr('sensor.enyaq_fahrtenbuch', 'start_address') }}"
       - variables:
-          reinit: "{{ trigger.id in ['trip', 'reset'] or s_km is not number or s_soc is not number }}"
+          reinit: >-
+            {{ trigger.id in ['trip', 'reset']
+               or (trigger.id in ['start', 'online'] and (s_km is not number or s_soc is not number)) }}
           new_trips: >-
             {% if trigger.id == 'trip' %}{{ ([dict(trigger.event.data)] + old_trips)[:30] }}
             {% else %}{{ old_trips }}{% endif %}

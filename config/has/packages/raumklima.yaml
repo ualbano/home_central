@@ -1,0 +1,175 @@
+# ═══════════════════════════════════════════════════════════════
+#  RAUMKLIMA  –  Hinweise und Push für das Dashboard "Raumklima"
+# ═══════════════════════════════════════════════════════════════
+#
+#  sensor.raumklima_feucht            Räume, in denen Lüften Feuchte rausbringt
+#                                     (≥ 65 % und draußen ≥ 2 g/m³ trockener)
+#  sensor.raumklima_zu_warm           überheizte Räume (> Soll + 1,5 °C, ohne
+#                                     Heizung > 24 °C) und draußen ≥ 3 °C kühler
+#  sensor.raumklima_batterie_schwach  Sensoren unter 25 %
+#  sensor.aussen_min_24h / _max_24h   Außentemperatur der letzten 24 h
+#
+#  Push: nur "zu warm", max. 1× pro Raum in 3 h, nicht zwischen 22 und 7 Uhr.
+#
+#  Räume anpassen: Liste "raeume" unten (2 Stellen: Sensor + Batterie).
+# ═══════════════════════════════════════════════════════════════
+
+sensor:
+  - platform: statistics
+    name: Außen Min 24h
+    unique_id: aussen_min_24h
+    entity_id: sensor.eve_weather_20ebs9901_temperature
+    state_characteristic: value_min
+    max_age:
+      hours: 24
+    sampling_size: 2000
+  - platform: statistics
+    name: Außen Max 24h
+    unique_id: aussen_max_24h
+    entity_id: sensor.eve_weather_20ebs9901_temperature
+    state_characteristic: value_max
+    max_age:
+      hours: 24
+    sampling_size: 2000
+
+template:
+  - triggers:
+      - trigger: time_pattern
+        minutes: /5
+      - trigger: homeassistant
+        event: start
+      - trigger: event
+        event_type: event_template_reloaded
+      - trigger: event
+        event_type: raumklima_gemeldet
+        id: gemeldet
+    actions:
+      - variables:
+          schwelle_soll: 1.5      # °C über Soll = zu warm
+          schwelle_ohne: 24       # °C für Räume ohne Heizung
+          aussen_kuehler: 3       # so viel kühler muss es draußen sein
+          feucht_rh: 65           # % relative Feuchte
+          feucht_diff: 2          # g/m³ trockener draußen
+          raeume:
+            - { name: Wohnzimmer,    t: sensor.temp_wohnzimmer_temperature,              h: sensor.temp_wohnzimmer_humidity,              c: climate.eve_thermo_20ebp1701_3 }
+            - { name: Arbeitszimmer, t: sensor.timmerflotte_temp_hmd_sensor_temperature, h: sensor.timmerflotte_temp_hmd_sensor_humidity, c: climate.eve_thermo_20ebp1701_4 }
+            - { name: Kinderzimmer,  t: sensor.temp_kz_temperature,                      h: sensor.temp_kz_humidity,                      c: climate.eve_thermo_20ebp1701_5 }
+            - { name: Schlafzimmer,  t: sensor.temp_schlafzimmer_temperature,            h: sensor.temp_schlafzimmer_humidity,            c: climate.eve_thermo_20ebp1701_2 }
+            - { name: Bad,           t: sensor.temp_bad_temperature,                     h: sensor.temp_bad_humidity,                     c: climate.eve_thermo_20ebp1701 }
+            - { name: Küche,         t: sensor.temp_kuech_temperature,                   h: sensor.temp_kuech_humidity,                   c: null }
+          batterien:
+            - { name: Wohnzimmer,    e: sensor.temp_wohnzimmer_battery }
+            - { name: Arbeitszimmer, e: sensor.timmerflotte_temp_hmd_sensor_battery }
+            - { name: Kinderzimmer,  e: sensor.temp_kz_battery }
+            - { name: Schlafzimmer,  e: sensor.temp_schlafzimmer_battery }
+            - { name: Bad,           e: sensor.temp_bad_battery }
+            - { name: Küche,         e: sensor.temp_kuech_battery }
+            - { name: Außen,         e: sensor.eve_weather_20ebs9901_battery }
+          a_t: "{{ states('sensor.eve_weather_20ebs9901_temperature') | float(none) }}"
+          a_h: "{{ states('sensor.eve_weather_20ebs9901_humidity') | float(none) }}"
+      - variables:
+          # absolute Feuchte in g/m³ (Magnus-Formel)
+          a_ah: >-
+            {{ (6.112 * e ** (17.67 * a_t / (a_t + 243.5)) * a_h * 2.1674 / (273.15 + a_t)) | round(1)
+               if a_t is number and a_h is number else none }}
+          feucht: >-
+            {%- set ns = namespace(l=[]) -%}
+            {%- for r in raeume -%}
+              {%- set t = states(r.t) | float(none) -%}{%- set h = states(r.h) | float(none) -%}
+              {%- if t is number and h is number and h >= feucht_rh and a_t is number and a_h is number -%}
+                {%- set ah = 6.112 * e ** (17.67 * t / (t + 243.5)) * h * 2.1674 / (273.15 + t) -%}
+                {%- set aah = 6.112 * e ** (17.67 * a_t / (a_t + 243.5)) * a_h * 2.1674 / (273.15 + a_t) -%}
+                {%- if ah - aah >= feucht_diff -%}
+                  {%- set ns.l = ns.l + [dict(name=r.name, rh=h | round(0) | int, ah=ah | round(1))] -%}
+                {%- endif -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ ns.l }}
+          zu_warm: >-
+            {%- set ns = namespace(l=[]) -%}
+            {%- for r in raeume -%}
+              {%- set t = states(r.t) | float(none) -%}
+              {%- set soll = state_attr(r.c, 'temperature') if r.c else none -%}
+              {%- set heizt = r.c and states(r.c) not in ['off', 'unknown', 'unavailable'] and soll is number -%}
+              {%- set grenze = soll + schwelle_soll if heizt else schwelle_ohne -%}
+              {%- if t is number and t > grenze and a_t is number and a_t <= t - aussen_kuehler -%}
+                {%- set ns.l = ns.l + [dict(name=r.name, ist=t | round(1), soll=(soll if heizt else none))] -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ ns.l }}
+          schwach: >-
+            {%- set ns = namespace(l=[]) -%}
+            {%- for b in batterien -%}
+              {%- set v = states(b.e) | float(none) -%}
+              {%- if v is number and v < 25 -%}{%- set ns.l = ns.l + [dict(name=b.name, wert=v | round(0) | int)] -%}{%- endif -%}
+            {%- endfor -%}
+            {{ ns.l | sort(attribute='wert') }}
+          gemeldet: >-
+            {%- set g = state_attr('sensor.raumklima_zu_warm', 'gemeldet') or {} -%}
+            {%- if trigger.id == 'gemeldet' -%}
+              {{ dict(g, **{trigger.event.data.name: now().isoformat()}) }}
+            {%- else -%}{{ g }}{%- endif -%}
+    sensor:
+      - name: Raumklima feucht
+        unique_id: raumklima_feucht
+        icon: mdi:water-percent-alert
+        state: "{{ feucht | count }}"
+        attributes:
+          raeume: "{{ feucht }}"
+          aussen_abs_feuchte: "{{ a_ah }}"
+      - name: Raumklima zu warm
+        unique_id: raumklima_zu_warm
+        icon: mdi:thermometer-alert
+        state: "{{ zu_warm | count }}"
+        attributes:
+          raeume: "{{ zu_warm }}"
+          gemeldet: "{{ gemeldet }}"
+      - name: Raumklima Batterie schwach
+        unique_id: raumklima_batterie_schwach
+        icon: mdi:battery-alert-variant-outline
+        state: "{{ schwach | count }}"
+        attributes:
+          geraete: "{{ schwach }}"
+
+automation:
+  - id: raumklima_zu_warm_push
+    alias: "Raumklima: Push wenn Raum zu warm"
+    description: Meldet überheizte Räume, max. 1× pro Raum in 3 h, nicht nachts.
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: sensor.raumklima_zu_warm
+        attribute: raeume
+      - trigger: time
+        at: "07:00:00"
+    conditions:
+      - condition: time
+        after: "07:00:00"
+        before: "22:00:00"
+    actions:
+      - variables:
+          gemeldet: "{{ state_attr('sensor.raumklima_zu_warm', 'gemeldet') or {} }}"
+          neu: >-
+            {%- set ns = namespace(l=[]) -%}
+            {%- for r in state_attr('sensor.raumklima_zu_warm', 'raeume') or [] -%}
+              {%- set zuletzt = as_datetime(gemeldet.get(r.name)) if gemeldet.get(r.name) else none -%}
+              {%- if zuletzt is none or now() - zuletzt > timedelta(hours=3) -%}{%- set ns.l = ns.l + [r] -%}{%- endif -%}
+            {%- endfor -%}
+            {{ ns.l }}
+          aussen: "{{ states('sensor.eve_weather_20ebs9901_temperature') | float(0) | round(1) }}"
+      - repeat:
+          for_each: "{{ neu }}"
+          sequence:
+            - action: notify.mobile_app_iphoneumberto
+              data:
+                title: "{{ repeat.item.name }} zu warm"
+                message: >-
+                  {%- macro n(x) -%}{{ ('%.1f' % x) | replace('.', ',') }}{%- endmacro -%}
+                  {{ n(repeat.item.ist) }}°
+                  {%- if repeat.item.soll is number %} statt {{ n(repeat.item.soll) }}°{% endif %} · draußen {{ n(aussen) }}°. Kurz stoßlüften?
+                data:
+                  tag: "raumklima-warm-{{ repeat.item.name }}"
+                  url: /dashboard-raumklima/klima
+            - event: raumklima_gemeldet
+              event_data:
+                name: "{{ repeat.item.name }}"

@@ -1,0 +1,454 @@
+# ═══════════════════════════════════════════════════════════════
+#  RAUMKLIMA DASHBOARD
+# ═══════════════════════════════════════════════════════════════
+#  YAML-Dashboard – wird über "lovelace: dashboards" in configuration.yaml
+#  geladen. Änderungen hier im Repo machen, nicht im UI-Editor.
+#
+#  Benötigt (HACS → Frontend):
+#    • Mushroom   • Lovelace Card Mod   • ApexCharts Card   • mini-graph-card
+#  Daten für Hinweise: packages/raumklima.yaml
+#
+#  Raumfarben (überall gleich):
+#    Wohnzimmer #EF9F27 · Arbeitszimmer #7F77DD · Kinderzimmer #1D9E75
+#    Schlafzimmer #D4537E · Bad #5DCAA5 · Küche #D85A30 · Außen #378ADD
+# ═══════════════════════════════════════════════════════════════
+
+title: Raumklima
+views:
+  - title: Klima
+    path: klima
+    icon: mdi:home-thermometer
+    type: sections
+    max_columns: 3
+    sections:
+
+      # ─────────────────────── A · AUSSEN + B · HINWEISE ───────────────────────
+      - type: grid
+        cards:
+          - type: custom:mushroom-template-card
+            entity: sensor.eve_weather_20ebs9901_temperature
+            primary: >-
+              {{ (states(entity) | float(0) | round(1) | string) | replace('.', ',') }} °C
+            secondary: >-
+              {%- set trend = {'sunny':'sonnig','cloudy':'bewölkt','rainy':'Regen','stormy':'Sturm'} -%}
+              {%- set mn = states('sensor.aussen_min_24h') | float(none) -%}
+              {%- set mx = states('sensor.aussen_max_24h') | float(none) -%}
+              Außen · {{ trend.get(states('sensor.eve_weather_20ebs9901_weather_trend'), '–') }}
+              · {{ states('sensor.eve_weather_20ebs9901_humidity') | float(0) | round(0) | int }} %
+              · {{ states('sensor.eve_weather_20ebs9901_pressure') | float(0) | round(0) | int }} hPa
+              {%- if mn is number and mx is number %}
+              · 24 h: {{ (mn | round(1) | string) | replace('.', ',') }}° / {{ (mx | round(1) | string) | replace('.', ',') }}°{% endif %}
+            icon: >-
+              {{ {'sunny':'mdi:weather-sunny','cloudy':'mdi:weather-cloudy','rainy':'mdi:weather-rainy',
+                  'stormy':'mdi:weather-lightning-rainy'}.get(states('sensor.eve_weather_20ebs9901_weather_trend'),
+                  'mdi:thermometer') }}
+            icon_color: >-
+              {% set t = states(entity) | float(0) %}
+              {{ 'blue' if t < 5 else 'teal' if t < 15 else 'amber' if t < 25 else 'deep-orange' }}
+            multiline_secondary: true
+            tap_action:
+              action: more-info
+            grid_options:
+              columns: full
+            card_mod:
+              style: |
+                ha-card {
+                  --card-primary-font-size: 30px;
+                  --card-primary-font-weight: 600;
+                  --card-primary-line-height: 36px;
+                  --card-secondary-font-size: 13px;
+                }
+
+          - type: custom:mushroom-chips-card
+            alignment: start
+            chips:
+              - type: conditional
+                conditions:
+                  - condition: numeric_state
+                    entity: sensor.raumklima_zu_warm
+                    above: 0
+                chip:
+                  type: template
+                  entity: sensor.raumklima_zu_warm
+                  icon: mdi:thermometer-alert
+                  icon_color: deep-orange
+                  content: >-
+                    Zu warm: {{ (state_attr(entity, 'raeume') or []) | map(attribute='name') | join(', ') }}
+              - type: conditional
+                conditions:
+                  - condition: numeric_state
+                    entity: sensor.raumklima_feucht
+                    above: 0
+                chip:
+                  type: template
+                  entity: sensor.raumklima_feucht
+                  icon: mdi:water-percent-alert
+                  icon_color: amber
+                  content: >-
+                    Feucht, Lüften hilft: {{ (state_attr(entity, 'raeume') or []) | map(attribute='name') | join(', ') }}
+              - type: conditional
+                conditions:
+                  - condition: numeric_state
+                    entity: sensor.raumklima_batterie_schwach
+                    above: 0
+                chip:
+                  type: template
+                  entity: sensor.raumklima_batterie_schwach
+                  icon: mdi:battery-alert-variant-outline
+                  icon_color: red
+                  content: >-
+                    {%- for g in state_attr(entity, 'geraete') or [] -%}
+                    {{ g.name }} {{ g.wert }} %{{ ', ' if not loop.last }}
+                    {%- endfor -%}
+
+      # ─────────────────────────── C · RÄUME ───────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Räume
+            icon: mdi:home-thermometer-outline
+
+          - type: custom:mini-graph-card
+            name: Wohnzimmer
+            icon: mdi:sofa-outline
+            entities:
+              - entity: sensor.temp_wohnzimmer_temperature
+              - entity: sensor.temp_wohnzimmer_humidity
+                show_graph: false
+                show_state: true
+              - entity: climate.eve_thermo_20ebp1701_3
+                attribute: temperature
+                name: Soll
+                unit: "° Soll"
+                show_graph: false
+                show_state: true
+            hours_to_show: 24
+            points_per_hour: 2
+            line_width: 3
+            height: 70
+            decimals: 1
+            font_size: 80
+            show: &show { fill: fade, icon: true, name: true, state: true, labels: false, legend: false }
+            color_thresholds: &temp_farben
+              - { value: 16, color: "#378ADD" }
+              - { value: 19, color: "#1D9E75" }
+              - { value: 21, color: "#EF9F27" }
+              - { value: 23, color: "#D85A30" }
+            tap_action:
+              action: more-info
+              entity: climate.eve_thermo_20ebp1701_3
+            grid_options:
+              columns: 6
+
+          - type: custom:mini-graph-card
+            name: Arbeitszimmer
+            icon: mdi:desk
+            entities:
+              - entity: sensor.timmerflotte_temp_hmd_sensor_temperature
+              - entity: sensor.timmerflotte_temp_hmd_sensor_humidity
+                show_graph: false
+                show_state: true
+              - entity: climate.eve_thermo_20ebp1701_4
+                attribute: temperature
+                name: Soll
+                unit: "° Soll"
+                show_graph: false
+                show_state: true
+            hours_to_show: 24
+            points_per_hour: 2
+            line_width: 3
+            height: 70
+            decimals: 1
+            font_size: 80
+            show: *show
+            color_thresholds: *temp_farben
+            tap_action:
+              action: more-info
+              entity: climate.eve_thermo_20ebp1701_4
+            grid_options:
+              columns: 6
+
+          - type: custom:mini-graph-card
+            name: Kinderzimmer
+            icon: mdi:teddy-bear
+            entities:
+              - entity: sensor.temp_kz_temperature
+              - entity: sensor.temp_kz_humidity
+                show_graph: false
+                show_state: true
+              - entity: climate.eve_thermo_20ebp1701_5
+                attribute: temperature
+                name: Soll
+                unit: "° Soll"
+                show_graph: false
+                show_state: true
+            hours_to_show: 24
+            points_per_hour: 2
+            line_width: 3
+            height: 70
+            decimals: 1
+            font_size: 80
+            show: *show
+            color_thresholds: *temp_farben
+            tap_action:
+              action: more-info
+              entity: climate.eve_thermo_20ebp1701_5
+            grid_options:
+              columns: 6
+
+          - type: custom:mini-graph-card
+            name: Schlafzimmer
+            icon: mdi:bed-outline
+            entities:
+              - entity: sensor.temp_schlafzimmer_temperature
+              - entity: sensor.temp_schlafzimmer_humidity
+                show_graph: false
+                show_state: true
+              - entity: climate.eve_thermo_20ebp1701_2
+                attribute: temperature
+                name: Soll
+                unit: "° Soll"
+                show_graph: false
+                show_state: true
+            hours_to_show: 24
+            points_per_hour: 2
+            line_width: 3
+            height: 70
+            decimals: 1
+            font_size: 80
+            show: *show
+            color_thresholds: *temp_farben
+            tap_action:
+              action: more-info
+              entity: climate.eve_thermo_20ebp1701_2
+            grid_options:
+              columns: 6
+
+          - type: custom:mini-graph-card
+            name: Bad
+            icon: mdi:shower-head
+            entities:
+              - entity: sensor.temp_bad_temperature
+              - entity: sensor.temp_bad_humidity
+                show_graph: false
+                show_state: true
+              - entity: climate.eve_thermo_20ebp1701
+                attribute: temperature
+                name: Soll
+                unit: "° Soll"
+                show_graph: false
+                show_state: true
+            hours_to_show: 24
+            points_per_hour: 2
+            line_width: 3
+            height: 70
+            decimals: 1
+            font_size: 80
+            show: *show
+            color_thresholds: *temp_farben
+            tap_action:
+              action: more-info
+              entity: climate.eve_thermo_20ebp1701
+            grid_options:
+              columns: 6
+
+          - type: custom:mini-graph-card
+            name: Küche
+            icon: mdi:stove
+            entities:
+              - entity: sensor.temp_kuech_temperature
+              - entity: sensor.temp_kuech_humidity
+                show_graph: false
+                show_state: true
+            hours_to_show: 24
+            points_per_hour: 2
+            line_width: 3
+            height: 70
+            decimals: 1
+            font_size: 80
+            show: *show
+            color_thresholds: *temp_farben
+            tap_action:
+              action: more-info
+              entity: sensor.temp_kuech_temperature
+            grid_options:
+              columns: 6
+
+      # ─────────────────────────── D · HEIZUNG ───────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Heizung
+            icon: mdi:radiator
+
+          - type: tile
+            entity: input_boolean.heizen
+            name: Heizen
+            icon: mdi:fire
+            color: deep-orange
+            vertical: false
+            features:
+              - type: toggle
+            grid_options:
+              columns: full
+
+          - type: tile
+            entity: climate.eve_thermo_20ebp1701_3
+            name: Wohnzimmer
+            icon: mdi:sofa-outline
+            features: &soll
+              - type: target-temperature
+            grid_options:
+              columns: full
+
+          - type: tile
+            entity: climate.eve_thermo_20ebp1701_4
+            name: Arbeitszimmer
+            icon: mdi:desk
+            features: *soll
+            grid_options:
+              columns: full
+
+          - type: tile
+            entity: climate.eve_thermo_20ebp1701_5
+            name: Kinderzimmer
+            icon: mdi:teddy-bear
+            features: *soll
+            grid_options:
+              columns: full
+
+          - type: tile
+            entity: climate.eve_thermo_20ebp1701_2
+            name: Schlafzimmer
+            icon: mdi:bed-outline
+            features: *soll
+            grid_options:
+              columns: full
+
+          - type: tile
+            entity: climate.eve_thermo_20ebp1701
+            name: Bad
+            icon: mdi:shower-head
+            features: *soll
+            grid_options:
+              columns: full
+
+      # ─────────────────────────── E · VERLAUF ───────────────────────────
+      - type: grid
+        column_span: 3
+        cards:
+          - type: heading
+            heading: Verlauf
+            icon: mdi:chart-line
+
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            header:
+              show: true
+              title: Temperatur · 24 h
+            apex_config:
+              chart:
+                height: 240
+              grid:
+                borderColor: rgba(127,127,127,.15)
+              legend:
+                show: true
+                position: bottom
+                horizontalAlign: left
+                formatter: |
+                  EVAL:function(name, opts) {
+                    const s = opts.w.globals.series[opts.seriesIndex] || [];
+                    const v = s.length ? s[s.length - 1] : null;
+                    return v == null ? name : name + ' ' + v.toFixed(1).replace('.', ',') + '°';
+                  }
+            yaxis:
+              - decimals: 0
+                apex_config:
+                  tickAmount: 5
+            series:
+              - { entity: sensor.temp_wohnzimmer_temperature,              name: Wohnzimmer,    color: "#EF9F27", stroke_width: 2, group_by: { func: avg, duration: 10min } }
+              - { entity: sensor.timmerflotte_temp_hmd_sensor_temperature, name: Arbeitszimmer, color: "#7F77DD", stroke_width: 2, group_by: { func: avg, duration: 10min } }
+              - { entity: sensor.temp_kz_temperature,                      name: Kinderzimmer,  color: "#1D9E75", stroke_width: 2, group_by: { func: avg, duration: 10min } }
+              - { entity: sensor.temp_schlafzimmer_temperature,            name: Schlafzimmer,  color: "#D4537E", stroke_width: 2, group_by: { func: avg, duration: 10min } }
+              - { entity: sensor.temp_bad_temperature,                     name: Bad,           color: "#5DCAA5", stroke_width: 2, group_by: { func: avg, duration: 10min } }
+              - { entity: sensor.temp_kuech_temperature,                   name: Küche,         color: "#D85A30", stroke_width: 2, group_by: { func: avg, duration: 10min } }
+              - { entity: sensor.eve_weather_20ebs9901_temperature,        name: Außen,         color: "#378ADD", stroke_width: 2, stroke_dash: 5, group_by: { func: avg, duration: 10min } }
+            grid_options:
+              columns: full
+
+          - type: custom:apexcharts-card
+            graph_span: 7d
+            header:
+              show: true
+              title: Temperatur · 7 Tage
+            apex_config:
+              chart:
+                height: 220
+              grid:
+                borderColor: rgba(127,127,127,.15)
+              legend:
+                show: true
+                position: bottom
+                horizontalAlign: left
+            yaxis:
+              - decimals: 0
+                apex_config:
+                  tickAmount: 5
+            series:
+              - { entity: sensor.temp_wohnzimmer_temperature,              name: Wohnzimmer,    color: "#EF9F27", stroke_width: 2, group_by: { func: avg, duration: 1h } }
+              - { entity: sensor.timmerflotte_temp_hmd_sensor_temperature, name: Arbeitszimmer, color: "#7F77DD", stroke_width: 2, group_by: { func: avg, duration: 1h } }
+              - { entity: sensor.temp_kz_temperature,                      name: Kinderzimmer,  color: "#1D9E75", stroke_width: 2, group_by: { func: avg, duration: 1h } }
+              - { entity: sensor.temp_schlafzimmer_temperature,            name: Schlafzimmer,  color: "#D4537E", stroke_width: 2, group_by: { func: avg, duration: 1h } }
+              - { entity: sensor.temp_bad_temperature,                     name: Bad,           color: "#5DCAA5", stroke_width: 2, group_by: { func: avg, duration: 1h } }
+              - { entity: sensor.temp_kuech_temperature,                   name: Küche,         color: "#D85A30", stroke_width: 2, group_by: { func: avg, duration: 1h } }
+              - { entity: sensor.eve_weather_20ebs9901_temperature,        name: Außen,         color: "#378ADD", stroke_width: 2, stroke_dash: 5, group_by: { func: avg, duration: 1h } }
+            grid_options:
+              columns: full
+
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            header:
+              show: true
+              title: Luftfeuchte · 24 h
+            apex_config:
+              chart:
+                height: 220
+              grid:
+                borderColor: rgba(127,127,127,.15)
+              annotations:
+                yaxis:
+                  - y: 60
+                    borderColor: "#EF9F27"
+                    strokeDashArray: 4
+                    label:
+                      text: 60 %
+                      borderWidth: 0
+                      style:
+                        background: transparent
+                        color: "#EF9F27"
+              legend:
+                show: true
+                position: bottom
+                horizontalAlign: left
+                formatter: |
+                  EVAL:function(name, opts) {
+                    const s = opts.w.globals.series[opts.seriesIndex] || [];
+                    const v = s.length ? s[s.length - 1] : null;
+                    return v == null ? name : name + ' ' + Math.round(v) + ' %';
+                  }
+            yaxis:
+              - min: 30
+                max: 90
+                decimals: 0
+                apex_config:
+                  tickAmount: 6
+            series:
+              - { entity: sensor.temp_wohnzimmer_humidity,              name: Wohnzimmer,    color: "#EF9F27", stroke_width: 2, group_by: { func: avg, duration: 10min } }
+              - { entity: sensor.timmerflotte_temp_hmd_sensor_humidity, name: Arbeitszimmer, color: "#7F77DD", stroke_width: 2, group_by: { func: avg, duration: 10min } }
+              - { entity: sensor.temp_kz_humidity,                      name: Kinderzimmer,  color: "#1D9E75", stroke_width: 2, group_by: { func: avg, duration: 10min } }
+              - { entity: sensor.temp_schlafzimmer_humidity,            name: Schlafzimmer,  color: "#D4537E", stroke_width: 2, group_by: { func: avg, duration: 10min } }
+              - { entity: sensor.temp_bad_humidity,                     name: Bad,           color: "#5DCAA5", stroke_width: 2, group_by: { func: avg, duration: 10min } }
+              - { entity: sensor.temp_kuech_humidity,                   name: Küche,         color: "#D85A30", stroke_width: 2, group_by: { func: avg, duration: 10min } }
+              - { entity: sensor.eve_weather_20ebs9901_humidity,        name: Außen,         color: "#378ADD", stroke_width: 2, stroke_dash: 5, group_by: { func: avg, duration: 10min } }
+            grid_options:
+              columns: full

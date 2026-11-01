@@ -42,6 +42,16 @@ container is running in network mode host
 Home Assistant is available on port 8123. Over the WebUI you can configure it, 
 but some configurations can only be made in the configuration file, therefore this configuration is part of this repo.
 
+#### Room climate
+
+- `config/has/dashboards/raumklima.yaml` – dashboard (YAML mode) with outdoor
+  values, hints, one tile per room with a 24 h curve, thermostat controls and
+  history charts. Needs Mushroom, Lovelace Card Mod, ApexCharts Card and
+  mini-graph-card from HACS.
+- `config/has/packages/raumklima.yaml` – hints (rooms too humid / too warm,
+  weak batteries), 24 h min/max outdoors and a push notification when a room is
+  overheated (max. once per room in 3 h, not at night).
+
 #### Load config from git
 
 The script *Config aus Git laden* (`config/has/packages/home_central.yaml`)

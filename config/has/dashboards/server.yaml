@@ -1,0 +1,323 @@
+# ═══════════════════════════════════════════════════════════════
+#  SERVER DASHBOARD
+# ═══════════════════════════════════════════════════════════════
+#  YAML-Dashboard – wird über "lovelace: dashboards" in configuration.yaml
+#  geladen. Änderungen hier im Repo machen, nicht im UI-Editor.
+#
+#  Benötigt (HACS → Frontend): Mushroom · ApexCharts Card
+#  Hilfssensoren: packages/server.yaml
+#
+#  Tablet: zwei Spalten · Handy: alles untereinander
+# ═══════════════════════════════════════════════════════════════
+
+title: Server
+views:
+  - title: Server
+    path: server
+    icon: mdi:desktop-classic
+    type: sections
+    max_columns: 2
+    dense_section_placement: true
+
+    # ─────────────────────── KOPFZEILE ───────────────────────
+    header:
+      layout: responsive
+      badges_position: bottom
+      badges_wrap: wrap
+      card:
+        type: markdown
+        text_only: true
+        content: |
+          {%- set boot = as_datetime(states('sensor.system_monitor_last_boot')) -%}
+          {%- set gruende = state_attr('binary_sensor.server_warnung', 'gruende') or [] %}
+          # Server
+          {% if boot %}Läuft seit {{ relative_time(boot) | replace('days', 'Tagen') | replace('day', 'Tag') | replace('hours', 'Stunden') | replace('hour', 'Stunde') | replace('minutes', 'Minuten') }} · {% endif -%}
+          {{ 'Achtung: ' ~ gruende | join(', ') if gruende else 'alles im grünen Bereich' }}
+
+    badges:
+      - type: entity
+        entity: sensor.system_monitor_processor_temperature
+        name: CPU
+        show_name: true
+        icon: mdi:thermometer
+        color: orange
+      - type: entity
+        entity: sensor.kz_siebtrager_power
+        name: Leistung
+        show_name: true
+        icon: mdi:flash
+        color: amber
+      - type: entity
+        entity: sensor.fritz_box_main_external_ip
+        name: Externe IP
+        show_name: true
+        icon: mdi:web
+        color: blue
+      - type: entity
+        entity: sensor.system_monitor_last_boot
+        name: Letzter Start
+        show_name: true
+        icon: mdi:restart
+        color: grey
+      - type: custom:mushroom-template-badge
+        entity: binary_sensor.server_warnung
+        icon: mdi:alert
+        color: red
+        label: Warnung
+        content: "{{ (state_attr(entity, 'gruende') or []) | join(', ') }}"
+        tap_action:
+          action: more-info
+        visibility:
+          - condition: state
+            entity: binary_sensor.server_warnung
+            state: "on"
+
+    sections:
+
+      # ─────────────────────────── AUSLASTUNG ───────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Auslastung
+            icon: mdi:gauge
+
+          - type: gauge
+            entity: sensor.system_monitor_processor_use
+            name: CPU
+            needle: true
+            min: 0
+            max: 100
+            severity: &ampel
+              green: 0
+              yellow: 70
+              red: 85
+            grid_options:
+              columns: 6
+
+          - type: gauge
+            entity: sensor.server_ram_auslastung
+            name: Arbeitsspeicher
+            needle: true
+            min: 0
+            max: 100
+            severity: *ampel
+            grid_options:
+              columns: 6
+
+          - type: gauge
+            entity: sensor.system_monitor_disk_usage
+            name: System-Platte
+            needle: true
+            min: 0
+            max: 100
+            severity: *ampel
+            grid_options:
+              columns: 6
+
+          - type: gauge
+            entity: sensor.server_disk_usage_mnt_external_disk
+            name: Externe Platte
+            needle: true
+            min: 0
+            max: 100
+            severity: *ampel
+            grid_options:
+              columns: 6
+
+          - type: custom:mushroom-template-card
+            entity: sensor.server_ram_belegt
+            primary: >-
+              {{ (states(entity) | string) | replace('.', ',') }} von 7,5 GB RAM belegt
+            secondary: Home Assistant darf max. 2 GB nutzen (docker-compose)
+            icon: mdi:memory
+            icon_color: >-
+              {% set p = states('sensor.server_ram_auslastung') | float(0) %}
+              {{ 'red' if p >= 85 else 'amber' if p >= 70 else 'green' }}
+            grid_options:
+              columns: full
+
+      # ─────────────────────────── LAST & TEMPERATUR ───────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Last & Temperatur
+            icon: mdi:chart-line
+
+          - type: custom:apexcharts-card
+            graph_span: 12h
+            header:
+              show: true
+              title: Load & CPU-Temperatur · 12 h
+              show_states: true
+              colorize_states: true
+            apex_config:
+              chart:
+                height: 220
+              grid:
+                borderColor: rgba(127,127,127,.15)
+              legend:
+                show: true
+                position: bottom
+                horizontalAlign: left
+            yaxis:
+              - id: load
+                min: 0
+                decimals: 1
+                apex_config:
+                  tickAmount: 4
+                  title:
+                    text: Load
+              - id: temp
+                opposite: true
+                decimals: 0
+                apex_config:
+                  tickAmount: 4
+                  title:
+                    text: °C
+            series:
+              - { entity: sensor.system_monitor_load_1m,  name: Load 1 min,  yaxis_id: load, color: "#7F77DD", stroke_width: 2, group_by: { func: avg, duration: 5min } }
+              - { entity: sensor.system_monitor_load_5m,  name: Load 5 min,  yaxis_id: load, color: "#AFA9EC", stroke_width: 2, group_by: { func: avg, duration: 5min } }
+              - { entity: sensor.system_monitor_load_15m, name: Load 15 min, yaxis_id: load, color: "#CECBF6", stroke_width: 2, group_by: { func: avg, duration: 5min } }
+              - { entity: sensor.system_monitor_processor_temperature, name: CPU-Temperatur, yaxis_id: temp, color: "#D85A30", stroke_width: 2, stroke_dash: 5, group_by: { func: avg, duration: 5min } }
+            grid_options:
+              columns: full
+
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            header:
+              show: true
+              title: CPU-Auslastung · 24 h
+              show_states: true
+              colorize_states: true
+            apex_config:
+              chart:
+                height: 160
+              grid:
+                borderColor: rgba(127,127,127,.15)
+            yaxis:
+              - min: 0
+                max: 100
+                decimals: 0
+                apex_config:
+                  tickAmount: 4
+            series:
+              - entity: sensor.system_monitor_processor_use
+                name: CPU
+                type: area
+                color: "#639922"
+                opacity: 0.25
+                stroke_width: 2
+                group_by:
+                  func: avg
+                  duration: 10min
+            grid_options:
+              columns: full
+
+      # ─────────────────────────── NETZWERK ───────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Netzwerk
+            icon: mdi:swap-vertical
+
+          - type: custom:apexcharts-card
+            graph_span: 6h
+            header:
+              show: true
+              title: Download ↑ · Upload ↓ · 6 h
+              show_states: true
+              colorize_states: true
+            apex_config:
+              chart:
+                height: 220
+              grid:
+                borderColor: rgba(127,127,127,.15)
+              annotations:
+                yaxis:
+                  - y: 0
+                    borderColor: rgba(127,127,127,.5)
+              yaxis:
+                labels:
+                  formatter: |
+                    EVAL:function(v) { return Math.abs(v).toFixed(1); }
+              tooltip:
+                y:
+                  formatter: |
+                    EVAL:function(v) { return v == null ? '' : Math.abs(v).toFixed(2); }
+            series:
+              - entity: sensor.system_monitor_network_throughput_in_enp1s0
+                name: Download
+                type: area
+                color: "#378ADD"
+                opacity: 0.3
+                stroke_width: 2
+                group_by:
+                  func: avg
+                  duration: 5min
+              - entity: sensor.system_monitor_network_throughput_out_enp1s0
+                name: Upload
+                type: area
+                color: "#1D9E75"
+                opacity: 0.3
+                stroke_width: 2
+                transform: "return -x;"
+                show:
+                  in_header: true
+                group_by:
+                  func: avg
+                  duration: 5min
+            grid_options:
+              columns: full
+
+      # ─────────────────────────── STROM ───────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Strom
+            icon: mdi:flash
+
+          - type: tile
+            entity: sensor.server_energie_tag
+            name: Heute
+            icon: mdi:calendar-today
+            color: amber
+            grid_options:
+              columns: 6
+
+          - type: tile
+            entity: sensor.server_energie_monat
+            name: Dieser Monat
+            icon: mdi:calendar-month
+            color: amber
+            grid_options:
+              columns: 6
+
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            header:
+              show: true
+              title: Leistung · 24 h
+              show_states: true
+              colorize_states: true
+            apex_config:
+              chart:
+                height: 160
+              grid:
+                borderColor: rgba(127,127,127,.15)
+            yaxis:
+              - min: 0
+                decimals: 0
+                apex_config:
+                  tickAmount: 4
+            series:
+              - entity: sensor.kz_siebtrager_power
+                name: Leistung
+                type: area
+                color: "#EF9F27"
+                opacity: 0.25
+                stroke_width: 2
+                group_by:
+                  func: avg
+                  duration: 10min
+            grid_options:
+              columns: full

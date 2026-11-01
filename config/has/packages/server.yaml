@@ -1,0 +1,76 @@
+# ═══════════════════════════════════════════════════════════════
+#  SERVER  –  Hilfssensoren für das Dashboard "Server"
+# ═══════════════════════════════════════════════════════════════
+#
+#  sensor.server_ram_auslastung     RAM in %  (Basis: 7629 MiB gesamt)
+#  sensor.server_ram_belegt         RAM in GB
+#  binary_sensor.server_warnung     an, wenn etwas kritisch ist; Attribut "gruende"
+#  sensor.server_energie_tag/monat  Stromverbrauch des Servers
+#
+#  Die Steckdose heißt noch "kz_siebtrager" (früher an der Kaffeemaschine).
+#  Umbenennen? Dann hier und in dashboards/server.yaml mit ersetzen.
+# ═══════════════════════════════════════════════════════════════
+
+template:
+  - sensor:
+      - name: Server RAM Auslastung
+        unique_id: server_ram_auslastung
+        icon: mdi:memory
+        unit_of_measurement: "%"
+        state_class: measurement
+        state: >-
+          {% set used = states('sensor.system_monitor_memory_use') | float(none) %}
+          {{ (used / 7629.39453 * 100) | round(1) if used is number else none }}
+      - name: Server RAM belegt
+        unique_id: server_ram_belegt
+        icon: mdi:memory
+        unit_of_measurement: GB
+        state_class: measurement
+        state: >-
+          {% set used = states('sensor.system_monitor_memory_use') | float(none) %}
+          {{ (used / 1024) | round(1) if used is number else none }}
+
+  - triggers:
+      - trigger: state
+        entity_id:
+          - sensor.system_monitor_disk_usage
+          - sensor.server_disk_usage_mnt_external_disk
+          - sensor.server_ram_auslastung
+          - sensor.system_monitor_processor_temperature
+      - trigger: homeassistant
+        event: start
+      - trigger: event
+        event_type: event_template_reloaded
+    actions:
+      - variables:
+          gruende: >-
+            {%- set ns = namespace(l=[]) -%}
+            {%- set checks = [
+                  ('System-Platte', states('sensor.system_monitor_disk_usage') | float(0), 85, '%'),
+                  ('Externe Platte', states('sensor.server_disk_usage_mnt_external_disk') | float(0), 85, '%'),
+                  ('RAM', states('sensor.server_ram_auslastung') | float(0), 90, '%'),
+                  ('CPU', states('sensor.system_monitor_processor_temperature') | float(0), 75, '°C')] -%}
+            {%- for name, wert, grenze, einheit in checks -%}
+              {%- if wert >= grenze -%}
+                {%- set ns.l = ns.l + [name ~ ' ' ~ (wert | round(0) | int) ~ ' ' ~ einheit] -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ ns.l }}
+    binary_sensor:
+      - name: Server Warnung
+        unique_id: server_warnung
+        icon: mdi:server-network-off
+        device_class: problem
+        state: "{{ gruende | count > 0 }}"
+        attributes:
+          gruende: "{{ gruende }}"
+
+utility_meter:
+  server_energie_tag:
+    name: Server Energie heute
+    source: sensor.kz_siebtrager_energy
+    cycle: daily
+  server_energie_monat:
+    name: Server Energie Monat
+    source: sensor.kz_siebtrager_energy
+    cycle: monthly

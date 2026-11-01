@@ -52,6 +52,15 @@ but some configurations can only be made in the configuration file, therefore th
   weak batteries), 24 h min/max outdoors and a push notification when a room is
   too humid (max. once per room in 3 h, not at night).
 
+#### Server
+
+- `config/has/dashboards/server.yaml` – dashboard (YAML mode) with CPU, RAM and
+  disk gauges, load/temperature, network and power consumption of the server.
+- `config/has/packages/server.yaml` – RAM in % and GB, a warning sensor
+  (disk > 85 %, RAM > 90 %, CPU > 75 °C) and daily/monthly energy.
+  The server's smart plug is still called `kz_siebtrager` (it used to power
+  the espresso machine).
+
 #### Load config from git
 
 The script *Config aus Git laden* (`config/has/packages/home_central.yaml`)

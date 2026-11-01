@@ -62,15 +62,19 @@ automation:
       - variables:
           soc_ende: "{{ [aktiv.soc_max | float(0), soc_now] | max }}"
           lid: "{{ now().timestamp() | int }}"
+          # Adresse ist beim Einstecken oft noch nicht aktualisiert → beim Abstecken nachholen
+          ort: >-
+            {%- set a = states('sensor.enyaq_address') -%}
+            {{ aktiv.ort if aktiv.ort not in [none, '?'] else (a if a not in ['unknown', 'unavailable'] else '?') }}
       - variables:
           kwh: "{{ ((soc_ende - aktiv.soc_start | float(0)) / 100 * cap) | round(1) }}"
-          ort_kurz: "{{ (aktiv.ort or '?').split(',')[0] }}"
+          ort_kurz: "{{ ort.split(',')[0] }}"
       - event: enyaq_ladung_ende
         event_data:
           id: "{{ lid }}"
           start: "{{ aktiv.start }}"
           ende: "{{ now().isoformat() }}"
-          ort: "{{ aktiv.ort }}"
+          ort: "{{ ort }}"
           soc_start: "{{ aktiv.soc_start | int }}"
           soc_ende: "{{ soc_ende | int }}"
           kwh: "{{ kwh }}"
@@ -204,6 +208,9 @@ template:
       - trigger: state
         entity_id: sensor.enyaq_battery_level
         id: soc
+      - trigger: state
+        entity_id: sensor.enyaq_address
+        id: addr
       - trigger: event
         event_type: enyaq_ladung_ende
         id: ende
@@ -225,13 +232,14 @@ template:
           neu_aktiv: >-
             {%- if trigger.id == 'plug' and soc_now >= 0 -%}
               {{ dict(start=now().isoformat(), soc_start=soc_now, soc_max=soc_now, ort=addr_now) }}
-            {%- elif trigger.id == 'soc' and aktiv is mapping and soc_now > aktiv.soc_max -%}
-              {{ dict(aktiv, soc_max=soc_now) }}
-            {%- elif trigger.id == 'soc' and aktiv is not mapping and soc_now >= 0
-                 and is_state('binary_sensor.enyaq_charging', 'on') -%}
-              {{ dict(start=now().isoformat(), soc_start=soc_now, soc_max=soc_now, ort=addr_now) }}
             {%- elif trigger.id in ['ende', 'reset'] -%}
               {{ none }}
+            {%- elif aktiv is mapping -%}
+              {{ dict(aktiv, soc_max=[aktiv.soc_max, soc_now] | max,
+                      ort=(addr_now if aktiv.ort in [none, '?'] else aktiv.ort)) }}
+            {%- elif trigger.id == 'soc' and soc_now >= 0
+                 and is_state('binary_sensor.enyaq_charging', 'on') -%}
+              {{ dict(start=now().isoformat(), soc_start=soc_now, soc_max=soc_now, ort=addr_now) }}
             {%- else -%}
               {{ aktiv }}
             {%- endif -%}
@@ -268,9 +276,16 @@ template:
           offen: "{{ neu_ladungen | selectattr('preis', 'none') | list | count }}"
 
   # Summen der bezahlten Ladungen – Basis für Monatswerte
+  # Start/Reload-Trigger: Sensor bekommt sofort einen Wert (0), sonst ignoriert
+  # der utility_meter den ersten Sprung von "unbekannt" auf den ersten Betrag.
   - triggers:
       - trigger: event
         event_type: enyaq_ladung_preis
+        id: preis
+      - trigger: homeassistant
+        event: start
+      - trigger: event
+        event_type: event_template_reloaded
     sensor:
       - name: Enyaq Ladekosten gesamt
         unique_id: enyaq_ladekosten_gesamt
@@ -278,8 +293,9 @@ template:
         unit_of_measurement: €
         state_class: total_increasing
         state: >-
-          {%- set d = trigger.event.data -%}
-          {{ ((this.state | float(0)) + d.kosten - d.kosten_alt) | round(2) }}
+          {%- set prev = this.state | float(0) -%}
+          {%- if trigger.id == 'preis' -%}{%- set d = trigger.event.data -%}
+          {{ (prev + d.kosten - d.kosten_alt) | round(2) }}{%- else -%}{{ prev }}{%- endif -%}
       - name: Enyaq Ladeenergie bezahlt gesamt
         unique_id: enyaq_ladeenergie_bezahlt_gesamt
         icon: mdi:ev-plug-type2
@@ -287,8 +303,9 @@ template:
         device_class: energy
         state_class: total_increasing
         state: >-
-          {%- set d = trigger.event.data -%}
-          {{ ((this.state | float(0)) + d.kwh_bezahlt - d.kwh_alt) | round(1) }}
+          {%- set prev = this.state | float(0) -%}
+          {%- if trigger.id == 'preis' -%}{%- set d = trigger.event.data -%}
+          {{ (prev + d.kwh_bezahlt - d.kwh_alt) | round(1) }}{%- else -%}{{ prev }}{%- endif -%}
 
   - binary_sensor:
       - name: Enyaq Ladung ohne Preis

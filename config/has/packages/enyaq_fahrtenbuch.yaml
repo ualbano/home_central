@@ -184,9 +184,16 @@ template:
           start_address: "{{ n_addr }}"
 
   # Summenzähler (nur Fahrten mit gültigem Verbrauch) – Basis für Monatswerte
+  # Start/Reload-Trigger: Sensor bekommt sofort einen Wert (0), sonst ignoriert
+  # der utility_meter den ersten Sprung von "unbekannt" auf die erste Fahrt.
   - triggers:
       - trigger: event
         event_type: enyaq_trip_end
+        id: trip
+      - trigger: homeassistant
+        event: start
+      - trigger: event
+        event_type: event_template_reloaded
     sensor:
       - name: Enyaq Fahrenergie gemessen
         unique_id: enyaq_fahrenergie_gemessen
@@ -195,8 +202,8 @@ template:
         device_class: energy
         state_class: total_increasing
         state: >-
-          {% set d = trigger.event.data %}
           {% set prev = this.state | float(0) %}
+          {% set d = trigger.event.data if trigger.id == 'trip' else {} %}
           {{ (prev + d.kwh) | round(2) if d.kwh is number else prev }}
       - name: Enyaq Fahrstrecke gemessen
         unique_id: enyaq_fahrstrecke_gemessen
@@ -205,8 +212,8 @@ template:
         device_class: distance
         state_class: total_increasing
         state: >-
-          {% set d = trigger.event.data %}
           {% set prev = this.state | float(0) %}
+          {% set d = trigger.event.data if trigger.id == 'trip' else {} %}
           {{ prev + d.km if d.kwh is number else prev }}
 
   # Monatsauswertung

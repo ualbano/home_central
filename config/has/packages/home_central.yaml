@@ -1,0 +1,94 @@
+# ═══════════════════════════════════════════════════════════════
+#  HOME CENTRAL  –  Konfiguration aus Git laden
+# ═══════════════════════════════════════════════════════════════
+#
+#  Das Skript "Config aus Git laden" holt den neuesten Stand dieses Repos
+#  und lädt danach Automationen, Skripte, Template-Sensoren, Helfer usw. neu.
+#
+#  Voraussetzung: Das Repo ist im Container unter /repo eingebunden
+#  (siehe docker-compose.yml, Volume ".:/repo").
+#
+#  Was ein Reload NICHT übernimmt (dafür "Danach neu starten" anhaken):
+#  • neue Integrationen/Abschnitte in configuration.yaml (z. B. shell_command,
+#    utility_meter, lovelace-Dashboards, http)
+#  Änderungen an docker-compose.yml greifen nur über scripts/update.sh.
+# ═══════════════════════════════════════════════════════════════
+
+shell_command:
+  # --ff-only: bricht ab statt zu mergen, wenn auf dem Server lokale Commits liegen
+  # safe.directory: Repo gehört evtl. einem anderen Nutzer als dem im Container
+  home_central_git_pull: >-
+    git -C /repo -c safe.directory=/repo pull --ff-only
+
+script:
+  home_central_config_laden:
+    alias: Config aus Git laden
+    icon: mdi:source-pull
+    mode: single
+    fields:
+      neustart:
+        name: Danach neu starten
+        description: Nötig bei Änderungen an configuration.yaml-Abschnitten, die kein Reload kennen.
+        default: false
+        selector:
+          boolean:
+    sequence:
+      - action: shell_command.home_central_git_pull
+        response_variable: git
+        continue_on_error: true
+
+      # Pull fehlgeschlagen → Fehler anzeigen und abbrechen
+      - if:
+          - condition: template
+            value_template: "{{ git is not defined or git.returncode != 0 }}"
+        then:
+          - action: persistent_notification.create
+            data:
+              notification_id: home_central_git
+              title: "❌ Git-Pull fehlgeschlagen"
+              message: >-
+                {% if git is defined %}```
+                {{ (git.stderr or git.stdout) | trim }}
+                ```{% else %}Details stehen im Protokoll.{% endif %}
+          - stop: Git-Pull fehlgeschlagen
+            error: true
+
+      # Nichts Neues
+      - if:
+          - condition: template
+            value_template: "{{ 'Already up to date' in git.stdout }}"
+        then:
+          - action: persistent_notification.create
+            data:
+              notification_id: home_central_git
+              title: "✅ Config ist aktuell"
+              message: Auf GitHub gibt es keine neuen Commits.
+          - stop: Schon aktuell
+
+      # Neu laden – reload_all prüft vorher die Konfiguration und bricht bei Fehlern ab
+      - action: homeassistant.reload_all
+        continue_on_error: true
+      - variables:
+          geaendert: >-
+            {{ git.stdout | regex_findall('(?m)^ (\S+)\s+\|') | join(', ') }}
+
+      - if:
+          - condition: template
+            value_template: "{{ neustart | default(false) }}"
+        then:
+          - action: persistent_notification.create
+            data:
+              notification_id: home_central_git
+              title: "🔄 Config geladen – Neustart läuft"
+              message: "Geändert: {{ geaendert or '–' }}"
+          - action: homeassistant.restart
+        else:
+          - action: persistent_notification.create
+            data:
+              notification_id: home_central_git
+              title: "✅ Config geladen"
+              message: >-
+                Geändert: {{ geaendert or '–' }}
+
+                Dashboards im YAML-Modus: Seite neu laden.
+                Falls etwas nicht übernommen wurde, mit "Danach neu starten" erneut ausführen.

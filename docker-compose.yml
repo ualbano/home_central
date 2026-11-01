@@ -5,6 +5,9 @@ services:
     image: "ghcr.io/home-assistant/home-assistant:stable"
     volumes:
       - ./config/has:/config
+      # The whole repo, so Home Assistant can pull new config from git
+      # (script "Config aus Git laden", config/has/packages/home_central.yaml).
+      - .:/repo
       - /etc/localtime:/etc/localtime:ro
       - /mnt/external_disk:/mnt/external_disk/:ro
     restart: always

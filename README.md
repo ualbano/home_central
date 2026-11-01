@@ -42,6 +42,14 @@ container is running in network mode host
 Home Assistant is available on port 8123. Over the WebUI you can configure it, 
 but some configurations can only be made in the configuration file, therefore this configuration is part of this repo.
 
+#### Load config from git
+
+The script *Config aus Git laden* (`config/has/packages/home_central.yaml`)
+pulls this repo from inside Home Assistant and reloads automations, scripts,
+templates and helpers. Tick *Danach neu starten* for changes that need a
+restart. For this the repo is mounted into the container as `/repo`.
+Changes to `docker-compose.yml` and new images still need `scripts/update.sh`.
+
 #### Škoda Enyaq
 
 The car is connected via the HACS integration *Škoda API Connect*.

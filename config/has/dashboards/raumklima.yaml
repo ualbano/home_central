@@ -19,90 +19,88 @@ views:
     path: klima
     icon: mdi:home-thermometer
     type: sections
-    max_columns: 3
-    # Tablet quer: Außen | Räume | Heizung, darunter 3 Diagramme nebeneinander
-    # Tablet hoch:  2 Spalten · Handy: alles untereinander, Räume und Thermostate zweispaltig
+    max_columns: 2
+    # Tablet: Räume | Heizung, darunter Temperatur + Feuchte 24 h nebeneinander, 7 Tage breit
+    # Handy:  alles untereinander, Räume und Thermostate zweispaltig
     dense_section_placement: true
+
+    # ─────────────────────── KOPFZEILE: Außen + Hinweise ───────────────────────
+    header:
+      layout: responsive
+      badges_position: bottom
+      badges_wrap: wrap
+      card:
+        type: markdown
+        text_only: true
+        content: |
+          {%- set trend = {'sunny':'sonnig','cloudy':'bewölkt','rainy':'Regen','stormy':'Sturm'} -%}
+          {%- set mn = states('sensor.aussen_min_24h') | float(none) -%}
+          {%- set mx = states('sensor.aussen_max_24h') | float(none) -%}
+          # Raumklima
+          Draußen {{ trend.get(states('sensor.eve_weather_20ebs9901_weather_trend'), '') }}
+          {%- if mn is number and mx is number %} · 24 h {{ (mn | round(1) | string) | replace('.', ',') }}° bis {{ (mx | round(1) | string) | replace('.', ',') }}°{% endif %}
+          · {{ states('sensor.eve_weather_20ebs9901_pressure') | float(0) | round(0) | int }} hPa
+
+    badges:
+      - type: entity
+        entity: sensor.eve_weather_20ebs9901_temperature
+        name: Außen
+        show_name: true
+        icon: mdi:thermometer
+        color: blue
+      - type: entity
+        entity: sensor.eve_weather_20ebs9901_humidity
+        name: Außen
+        show_name: true
+        icon: mdi:water-percent
+        color: blue
+      - type: entity
+        entity: input_boolean.heizen
+        name: Heizen
+        show_name: true
+        icon: mdi:fire
+        color: deep-orange
+        tap_action:
+          action: toggle
+      # Hinweise – nur sichtbar, wenn etwas zu tun ist
+      - type: custom:mushroom-template-badge
+        entity: sensor.raumklima_feucht
+        icon: mdi:water-percent-alert
+        color: amber
+        label: Feucht – lüften
+        content: "{{ (state_attr(entity, 'raeume') or []) | map(attribute='name') | join(', ') }}"
+        tap_action:
+          action: more-info
+        visibility:
+          - condition: numeric_state
+            entity: sensor.raumklima_feucht
+            above: 0
+      - type: custom:mushroom-template-badge
+        entity: sensor.raumklima_zu_warm
+        icon: mdi:thermometer-alert
+        color: deep-orange
+        label: Zu warm
+        content: "{{ (state_attr(entity, 'raeume') or []) | map(attribute='name') | join(', ') }}"
+        tap_action:
+          action: more-info
+        visibility:
+          - condition: numeric_state
+            entity: sensor.raumklima_zu_warm
+            above: 0
+      - type: custom:mushroom-template-badge
+        entity: sensor.raumklima_batterie_schwach
+        icon: mdi:battery-alert-variant-outline
+        color: red
+        label: Batterie
+        content: >-
+          {%- for g in state_attr(entity, 'geraete') or [] -%}{{ g.name }} {{ g.wert }} %{{ ', ' if not loop.last }}{%- endfor -%}
+        tap_action:
+          action: more-info
+        visibility:
+          - condition: numeric_state
+            entity: sensor.raumklima_batterie_schwach
+            above: 0
     sections:
-
-      # ─────────────────────── A · AUSSEN + B · HINWEISE ───────────────────────
-      - type: grid
-        cards:
-          - type: custom:mushroom-template-card
-            entity: sensor.eve_weather_20ebs9901_temperature
-            primary: >-
-              {{ (states(entity) | float(0) | round(1) | string) | replace('.', ',') }} °C
-            secondary: >-
-              {%- set trend = {'sunny':'sonnig','cloudy':'bewölkt','rainy':'Regen','stormy':'Sturm'} -%}
-              {%- set mn = states('sensor.aussen_min_24h') | float(none) -%}
-              {%- set mx = states('sensor.aussen_max_24h') | float(none) -%}
-              Außen · {{ trend.get(states('sensor.eve_weather_20ebs9901_weather_trend'), '–') }}
-              · {{ states('sensor.eve_weather_20ebs9901_humidity') | float(0) | round(0) | int }} %
-              · {{ states('sensor.eve_weather_20ebs9901_pressure') | float(0) | round(0) | int }} hPa
-              {%- if mn is number and mx is number %}
-              · 24 h: {{ (mn | round(1) | string) | replace('.', ',') }}° / {{ (mx | round(1) | string) | replace('.', ',') }}°{% endif %}
-            icon: >-
-              {{ {'sunny':'mdi:weather-sunny','cloudy':'mdi:weather-cloudy','rainy':'mdi:weather-rainy',
-                  'stormy':'mdi:weather-lightning-rainy'}.get(states('sensor.eve_weather_20ebs9901_weather_trend'),
-                  'mdi:thermometer') }}
-            icon_color: >-
-              {% set t = states(entity) | float(0) %}
-              {{ 'blue' if t < 5 else 'teal' if t < 15 else 'amber' if t < 25 else 'deep-orange' }}
-            multiline_secondary: true
-            tap_action:
-              action: more-info
-            grid_options:
-              columns: full
-            card_mod:
-              style: |
-                ha-card {
-                  --card-primary-font-size: 30px;
-                  --card-primary-font-weight: 600;
-                  --card-primary-line-height: 36px;
-                  --card-secondary-font-size: 13px;
-                }
-
-          - type: custom:mushroom-chips-card
-            alignment: start
-            chips:
-              - type: conditional
-                conditions:
-                  - condition: numeric_state
-                    entity: sensor.raumklima_zu_warm
-                    above: 0
-                chip:
-                  type: template
-                  entity: sensor.raumklima_zu_warm
-                  icon: mdi:thermometer-alert
-                  icon_color: deep-orange
-                  content: >-
-                    Zu warm: {{ (state_attr(entity, 'raeume') or []) | map(attribute='name') | join(', ') }}
-              - type: conditional
-                conditions:
-                  - condition: numeric_state
-                    entity: sensor.raumklima_feucht
-                    above: 0
-                chip:
-                  type: template
-                  entity: sensor.raumklima_feucht
-                  icon: mdi:water-percent-alert
-                  icon_color: amber
-                  content: >-
-                    Feucht, Lüften hilft: {{ (state_attr(entity, 'raeume') or []) | map(attribute='name') | join(', ') }}
-              - type: conditional
-                conditions:
-                  - condition: numeric_state
-                    entity: sensor.raumklima_batterie_schwach
-                    above: 0
-                chip:
-                  type: template
-                  entity: sensor.raumklima_batterie_schwach
-                  icon: mdi:battery-alert-variant-outline
-                  icon_color: red
-                  content: >-
-                    {%- for g in state_attr(entity, 'geraete') or [] -%}
-                    {{ g.name }} {{ g.wert }} %{{ ', ' if not loop.last }}
-                    {%- endfor -%}
 
       # ─────────────────────────── C · RÄUME ───────────────────────────
       - type: grid
@@ -255,17 +253,6 @@ views:
             icon: mdi:radiator
 
           - type: tile
-            entity: input_boolean.heizen
-            name: Heizen
-            icon: mdi:fire
-            color: deep-orange
-            vertical: false
-            features:
-              - type: toggle
-            grid_options:
-              columns: full
-
-          - type: tile
             entity: climate.eve_thermo_20ebp1701_3
             name: Wohnzimmer
             icon: mdi:sofa-outline
@@ -307,9 +294,9 @@ views:
               columns: 6
 
       # ─────────────────────────── E · VERLAUF ───────────────────────────
-      # columns: 12 je Diagramm = Tablet quer 3 nebeneinander, Tablet hoch 2, Handy 1
+      # Tablet: 24-h-Diagramme je halbe Breite (12 von 24), 7 Tage volle Breite · Handy: alles voll
       - type: grid
-        column_span: 3
+        column_span: 2
         cards:
           - type: heading
             heading: Verlauf
@@ -347,35 +334,6 @@ views:
               - { entity: sensor.temp_bad_temperature,                     name: Bad,           color: "#5DCAA5", stroke_width: 2, group_by: { func: avg, duration: 10min } }
               - { entity: sensor.temp_kuech_temperature,                   name: Küche,         color: "#D85A30", stroke_width: 2, group_by: { func: avg, duration: 10min } }
               - { entity: sensor.eve_weather_20ebs9901_temperature,        name: Außen,         color: "#378ADD", stroke_width: 2, stroke_dash: 5, group_by: { func: avg, duration: 10min } }
-            grid_options:
-              columns: 12
-
-          - type: custom:apexcharts-card
-            graph_span: 7d
-            header:
-              show: true
-              title: Temperatur · 7 Tage
-            apex_config:
-              chart:
-                height: 220
-              grid:
-                borderColor: rgba(127,127,127,.15)
-              legend:
-                show: true
-                position: bottom
-                horizontalAlign: left
-            yaxis:
-              - decimals: 0
-                apex_config:
-                  tickAmount: 5
-            series:
-              - { entity: sensor.temp_wohnzimmer_temperature,              name: Wohnzimmer,    color: "#EF9F27", stroke_width: 2, group_by: { func: avg, duration: 1h } }
-              - { entity: sensor.timmerflotte_temp_hmd_sensor_temperature, name: Arbeitszimmer, color: "#7F77DD", stroke_width: 2, group_by: { func: avg, duration: 1h } }
-              - { entity: sensor.temp_kz_temperature,                      name: Kinderzimmer,  color: "#1D9E75", stroke_width: 2, group_by: { func: avg, duration: 1h } }
-              - { entity: sensor.temp_schlafzimmer_temperature,            name: Schlafzimmer,  color: "#D4537E", stroke_width: 2, group_by: { func: avg, duration: 1h } }
-              - { entity: sensor.temp_bad_temperature,                     name: Bad,           color: "#5DCAA5", stroke_width: 2, group_by: { func: avg, duration: 1h } }
-              - { entity: sensor.temp_kuech_temperature,                   name: Küche,         color: "#D85A30", stroke_width: 2, group_by: { func: avg, duration: 1h } }
-              - { entity: sensor.eve_weather_20ebs9901_temperature,        name: Außen,         color: "#378ADD", stroke_width: 2, stroke_dash: 5, group_by: { func: avg, duration: 1h } }
             grid_options:
               columns: 12
 
@@ -426,3 +384,32 @@ views:
               - { entity: sensor.eve_weather_20ebs9901_humidity,        name: Außen,         color: "#378ADD", stroke_width: 2, stroke_dash: 5, group_by: { func: avg, duration: 10min } }
             grid_options:
               columns: 12
+
+          - type: custom:apexcharts-card
+            graph_span: 7d
+            header:
+              show: true
+              title: Temperatur · 7 Tage
+            apex_config:
+              chart:
+                height: 220
+              grid:
+                borderColor: rgba(127,127,127,.15)
+              legend:
+                show: true
+                position: bottom
+                horizontalAlign: left
+            yaxis:
+              - decimals: 0
+                apex_config:
+                  tickAmount: 5
+            series:
+              - { entity: sensor.temp_wohnzimmer_temperature,              name: Wohnzimmer,    color: "#EF9F27", stroke_width: 2, group_by: { func: avg, duration: 1h } }
+              - { entity: sensor.timmerflotte_temp_hmd_sensor_temperature, name: Arbeitszimmer, color: "#7F77DD", stroke_width: 2, group_by: { func: avg, duration: 1h } }
+              - { entity: sensor.temp_kz_temperature,                      name: Kinderzimmer,  color: "#1D9E75", stroke_width: 2, group_by: { func: avg, duration: 1h } }
+              - { entity: sensor.temp_schlafzimmer_temperature,            name: Schlafzimmer,  color: "#D4537E", stroke_width: 2, group_by: { func: avg, duration: 1h } }
+              - { entity: sensor.temp_bad_temperature,                     name: Bad,           color: "#5DCAA5", stroke_width: 2, group_by: { func: avg, duration: 1h } }
+              - { entity: sensor.temp_kuech_temperature,                   name: Küche,         color: "#D85A30", stroke_width: 2, group_by: { func: avg, duration: 1h } }
+              - { entity: sensor.eve_weather_20ebs9901_temperature,        name: Außen,         color: "#378ADD", stroke_width: 2, stroke_dash: 5, group_by: { func: avg, duration: 1h } }
+            grid_options:
+              columns: full

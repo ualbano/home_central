@@ -50,7 +50,7 @@ but some configurations can only be made in the configuration file, therefore th
   mini-graph-card from HACS.
 - `config/has/packages/raumklima.yaml` – hints (rooms too humid / too warm,
   weak batteries), 24 h min/max outdoors and a push notification when a room is
-  overheated (max. once per room in 3 h, not at night).
+  too humid (max. once per room in 3 h, not at night).
 
 #### Load config from git
 

@@ -9,7 +9,8 @@
 #  sensor.raumklima_batterie_schwach  Sensoren unter 25 %
 #  sensor.aussen_min_24h / _max_24h   Außentemperatur der letzten 24 h
 #
-#  Push: nur "zu warm", max. 1× pro Raum in 3 h, nicht zwischen 22 und 7 Uhr.
+#  Push: nur "zu feucht", max. 1× pro Raum in 3 h, nicht zwischen 22 und 7 Uhr.
+#  "Zu warm" erscheint nur als Hinweis im Dashboard.
 #
 #  Räume anpassen: Liste "raeume" unten (2 Stellen: Sensor + Batterie).
 # ═══════════════════════════════════════════════════════════════
@@ -105,7 +106,7 @@ template:
             {%- endfor -%}
             {{ ns.l | sort(attribute='wert') }}
           gemeldet: >-
-            {%- set g = state_attr('sensor.raumklima_zu_warm', 'gemeldet') or {} -%}
+            {%- set g = state_attr('sensor.raumklima_feucht', 'gemeldet') or {} -%}
             {%- if trigger.id == 'gemeldet' -%}
               {{ dict(g, **{trigger.event.data.name: now().isoformat()}) }}
             {%- else -%}{{ g }}{%- endif -%}
@@ -117,13 +118,13 @@ template:
         attributes:
           raeume: "{{ feucht }}"
           aussen_abs_feuchte: "{{ a_ah }}"
+          gemeldet: "{{ gemeldet }}"
       - name: Raumklima zu warm
         unique_id: raumklima_zu_warm
         icon: mdi:thermometer-alert
         state: "{{ zu_warm | count }}"
         attributes:
           raeume: "{{ zu_warm }}"
-          gemeldet: "{{ gemeldet }}"
       - name: Raumklima Batterie schwach
         unique_id: raumklima_batterie_schwach
         icon: mdi:battery-alert-variant-outline
@@ -132,13 +133,13 @@ template:
           geraete: "{{ schwach }}"
 
 automation:
-  - id: raumklima_zu_warm_push
-    alias: "Raumklima: Push wenn Raum zu warm"
-    description: Meldet überheizte Räume, max. 1× pro Raum in 3 h, nicht nachts.
+  - id: raumklima_feucht_push
+    alias: "Raumklima: Push wenn Raum zu feucht"
+    description: Meldet Räume, in denen Lüften Feuchte rausbringt – max. 1× pro Raum in 3 h, nicht nachts.
     mode: queued
     triggers:
       - trigger: state
-        entity_id: sensor.raumklima_zu_warm
+        entity_id: sensor.raumklima_feucht
         attribute: raeume
       - trigger: time
         at: "07:00:00"
@@ -148,27 +149,26 @@ automation:
         before: "22:00:00"
     actions:
       - variables:
-          gemeldet: "{{ state_attr('sensor.raumklima_zu_warm', 'gemeldet') or {} }}"
+          gemeldet: "{{ state_attr('sensor.raumklima_feucht', 'gemeldet') or {} }}"
           neu: >-
             {%- set ns = namespace(l=[]) -%}
-            {%- for r in state_attr('sensor.raumklima_zu_warm', 'raeume') or [] -%}
+            {%- for r in state_attr('sensor.raumklima_feucht', 'raeume') or [] -%}
               {%- set zuletzt = as_datetime(gemeldet.get(r.name)) if gemeldet.get(r.name) else none -%}
               {%- if zuletzt is none or now() - zuletzt > timedelta(hours=3) -%}{%- set ns.l = ns.l + [r] -%}{%- endif -%}
             {%- endfor -%}
             {{ ns.l }}
-          aussen: "{{ states('sensor.eve_weather_20ebs9901_temperature') | float(0) | round(1) }}"
+          aussen_rh: "{{ states('sensor.eve_weather_20ebs9901_humidity') | float(0) | round(0) | int }}"
       - repeat:
           for_each: "{{ neu }}"
           sequence:
             - action: notify.mobile_app_iphoneumberto
               data:
-                title: "{{ repeat.item.name }} zu warm"
+                title: "{{ repeat.item.name }} zu feucht"
                 message: >-
-                  {%- macro n(x) -%}{{ ('%.1f' % x) | replace('.', ',') }}{%- endmacro -%}
-                  {{ n(repeat.item.ist) }}°
-                  {%- if repeat.item.soll is number %} statt {{ n(repeat.item.soll) }}°{% endif %} · draußen {{ n(aussen) }}°. Kurz stoßlüften?
+                  {{ repeat.item.rh }} % Luftfeuchte. Draußen ist die Luft trockener
+                  ({{ aussen_rh }} % bei kälterer Temperatur) – 5–10 Minuten stoßlüften.
                 data:
-                  tag: "raumklima-warm-{{ repeat.item.name }}"
+                  tag: "raumklima-feucht-{{ repeat.item.name }}"
                   url: /dashboard-raumklima/klima
             - event: raumklima_gemeldet
               event_data:

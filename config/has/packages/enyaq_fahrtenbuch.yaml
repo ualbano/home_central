@@ -113,7 +113,7 @@ script:
         target:
           entity_id: notify.fahrtenbuch_csv
         data:
-          message: "Datum;Uhrzeit;Von;Nach;km Start;km Ende;km;Akku Start %;Akku Ende %;kWh;kWh/100 km;Ladestopp"
+          message: "\uFEFFDatum;Uhrzeit;Von;Nach;km Start;km Ende;km;Akku Start %;Akku Ende %;kWh;kWh/100 km;Ladestopp"
 
   enyaq_fahrtenbuch_zuruecksetzen:
     alias: "Enyaq Fahrtenbuch: Liste leeren"

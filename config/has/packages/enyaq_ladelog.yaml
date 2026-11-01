@@ -189,7 +189,7 @@ script:
         target:
           entity_id: notify.ladelog_csv
         data:
-          message: "Datum;Uhrzeit;Ort;Akku Start %;Akku Ende %;kWh in Akku;kWh bezahlt (geschätzt);€/kWh;Kosten €"
+          message: "\uFEFFDatum;Uhrzeit;Ort;Akku Start %;Akku Ende %;kWh in Akku;kWh bezahlt (geschätzt);€/kWh;Kosten €"
 
   enyaq_ladelog_zuruecksetzen:
     alias: "Enyaq Ladelog: Liste leeren"

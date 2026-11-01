@@ -20,6 +20,9 @@ views:
     icon: mdi:home-thermometer
     type: sections
     max_columns: 3
+    # Tablet quer: Außen | Räume | Heizung, darunter 3 Diagramme nebeneinander
+    # Tablet hoch:  2 Spalten · Handy: alles untereinander, Räume und Thermostate zweispaltig
+    dense_section_placement: true
     sections:
 
       # ─────────────────────── A · AUSSEN + B · HINWEISE ───────────────────────
@@ -116,12 +119,6 @@ views:
               - entity: sensor.temp_wohnzimmer_humidity
                 show_graph: false
                 show_state: true
-              - entity: climate.eve_thermo_20ebp1701_3
-                attribute: temperature
-                name: Soll
-                unit: "° Soll"
-                show_graph: false
-                show_state: true
             hours_to_show: 24
             points_per_hour: 2
             line_width: 3
@@ -148,12 +145,6 @@ views:
               - entity: sensor.timmerflotte_temp_hmd_sensor_humidity
                 show_graph: false
                 show_state: true
-              - entity: climate.eve_thermo_20ebp1701_4
-                attribute: temperature
-                name: Soll
-                unit: "° Soll"
-                show_graph: false
-                show_state: true
             hours_to_show: 24
             points_per_hour: 2
             line_width: 3
@@ -174,12 +165,6 @@ views:
             entities:
               - entity: sensor.temp_kz_temperature
               - entity: sensor.temp_kz_humidity
-                show_graph: false
-                show_state: true
-              - entity: climate.eve_thermo_20ebp1701_5
-                attribute: temperature
-                name: Soll
-                unit: "° Soll"
                 show_graph: false
                 show_state: true
             hours_to_show: 24
@@ -204,12 +189,6 @@ views:
               - entity: sensor.temp_schlafzimmer_humidity
                 show_graph: false
                 show_state: true
-              - entity: climate.eve_thermo_20ebp1701_2
-                attribute: temperature
-                name: Soll
-                unit: "° Soll"
-                show_graph: false
-                show_state: true
             hours_to_show: 24
             points_per_hour: 2
             line_width: 3
@@ -230,12 +209,6 @@ views:
             entities:
               - entity: sensor.temp_bad_temperature
               - entity: sensor.temp_bad_humidity
-                show_graph: false
-                show_state: true
-              - entity: climate.eve_thermo_20ebp1701
-                attribute: temperature
-                name: Soll
-                unit: "° Soll"
                 show_graph: false
                 show_state: true
             hours_to_show: 24
@@ -299,7 +272,7 @@ views:
             features: &soll
               - type: target-temperature
             grid_options:
-              columns: full
+              columns: 6
 
           - type: tile
             entity: climate.eve_thermo_20ebp1701_4
@@ -307,7 +280,7 @@ views:
             icon: mdi:desk
             features: *soll
             grid_options:
-              columns: full
+              columns: 6
 
           - type: tile
             entity: climate.eve_thermo_20ebp1701_5
@@ -315,7 +288,7 @@ views:
             icon: mdi:teddy-bear
             features: *soll
             grid_options:
-              columns: full
+              columns: 6
 
           - type: tile
             entity: climate.eve_thermo_20ebp1701_2
@@ -323,7 +296,7 @@ views:
             icon: mdi:bed-outline
             features: *soll
             grid_options:
-              columns: full
+              columns: 6
 
           - type: tile
             entity: climate.eve_thermo_20ebp1701
@@ -331,9 +304,10 @@ views:
             icon: mdi:shower-head
             features: *soll
             grid_options:
-              columns: full
+              columns: 6
 
       # ─────────────────────────── E · VERLAUF ───────────────────────────
+      # columns: 12 je Diagramm = Tablet quer 3 nebeneinander, Tablet hoch 2, Handy 1
       - type: grid
         column_span: 3
         cards:
@@ -348,7 +322,7 @@ views:
               title: Temperatur · 24 h
             apex_config:
               chart:
-                height: 240
+                height: 220
               grid:
                 borderColor: rgba(127,127,127,.15)
               legend:
@@ -374,7 +348,7 @@ views:
               - { entity: sensor.temp_kuech_temperature,                   name: Küche,         color: "#D85A30", stroke_width: 2, group_by: { func: avg, duration: 10min } }
               - { entity: sensor.eve_weather_20ebs9901_temperature,        name: Außen,         color: "#378ADD", stroke_width: 2, stroke_dash: 5, group_by: { func: avg, duration: 10min } }
             grid_options:
-              columns: full
+              columns: 12
 
           - type: custom:apexcharts-card
             graph_span: 7d
@@ -403,7 +377,7 @@ views:
               - { entity: sensor.temp_kuech_temperature,                   name: Küche,         color: "#D85A30", stroke_width: 2, group_by: { func: avg, duration: 1h } }
               - { entity: sensor.eve_weather_20ebs9901_temperature,        name: Außen,         color: "#378ADD", stroke_width: 2, stroke_dash: 5, group_by: { func: avg, duration: 1h } }
             grid_options:
-              columns: full
+              columns: 12
 
           - type: custom:apexcharts-card
             graph_span: 24h
@@ -451,4 +425,4 @@ views:
               - { entity: sensor.temp_kuech_humidity,                   name: Küche,         color: "#D85A30", stroke_width: 2, group_by: { func: avg, duration: 10min } }
               - { entity: sensor.eve_weather_20ebs9901_humidity,        name: Außen,         color: "#378ADD", stroke_width: 2, stroke_dash: 5, group_by: { func: avg, duration: 10min } }
             grid_options:
-              columns: full
+              columns: 12

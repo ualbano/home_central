@@ -10,7 +10,7 @@
 #  • Verpasst? Auf dem Dashboard für die letzte offene Ladung nachtragen.
 #
 #  Anpassen
-#  • Push-Dienst: notify.iphoneumberto (1 Stelle).
+#  • Push-Dienst: notify.mobile_app_iphoneumberto (Home-Assistant-App, 1 Stelle).
 #  • CSV-Export: File-Integration → "Benachrichtigungsdienst in Datei",
 #    Pfad /config/ladelog.csv, Zeitstempel AUS, Entitäts-ID auf
 #    notify.ladelog_csv  umbenennen, dann einmal das Skript
@@ -83,7 +83,7 @@ automation:
       # nur sinnvolle Ladungen abfragen
       - condition: template
         value_template: "{{ kwh >= 1 }}"
-      - action: notify.iphoneumberto
+      - action: notify.mobile_app_iphoneumberto
         data:
           title: "⚡ Ladung beendet"
           message: >-

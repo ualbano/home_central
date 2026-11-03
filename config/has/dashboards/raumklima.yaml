@@ -76,18 +76,6 @@ views:
             entity: sensor.raumklima_feucht
             above: 0
       - type: custom:mushroom-template-badge
-        entity: sensor.raumklima_zu_warm
-        icon: mdi:thermometer-alert
-        color: deep-orange
-        label: Zu warm
-        content: "{{ (state_attr(entity, 'raeume') or []) | map(attribute='name') | join(', ') }}"
-        tap_action:
-          action: more-info
-        visibility:
-          - condition: numeric_state
-            entity: sensor.raumklima_zu_warm
-            above: 0
-      - type: custom:mushroom-template-badge
         entity: sensor.raumklima_batterie_schwach
         icon: mdi:battery-alert-variant-outline
         color: red

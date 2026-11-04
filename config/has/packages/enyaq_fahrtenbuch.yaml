@@ -10,8 +10,8 @@
 #
 #  SO FUNKTIONIERT'S
 #  • Das Fahrtenbuch merkt sich Kilometerstand, Akku und Adresse beim Parken.
-#  • Meldet das Auto danach geparkt mit höherem Kilometerstand, wird eine Fahrt
-#    eingetragen: km, Akku vorher/nachher, kWh, kWh/100 km.
+#  • Steht das Auto danach mind. 10 Minuten geparkt mit höherem Kilometerstand,
+#    wird eine Fahrt eingetragen (kürzere Stopps zählen zur selben Fahrt): km, Akku vorher/nachher, kWh, kWh/100 km.
 #  • Laden zwischen zwei Fahrten wird erkannt (Akkustart wird angehoben).
 #  • Steigt der Akku während einer Fahrt (Schnellladestopp), wird die Fahrt als
 #    "mit Ladestopp" markiert und fließt nicht in den Verbrauch ein.
@@ -34,23 +34,33 @@ input_number:
 automation:
   - id: enyaq_fahrtenbuch_fahrt_erfassen
     alias: "Enyaq Fahrtenbuch: Fahrt erfassen"
-    description: Trägt eine Fahrt ein, sobald das Auto geparkt mit höherem Kilometerstand meldet.
+    description: >-
+      Trägt eine Fahrt ein, sobald das Auto mindestens 10 Minuten geparkt ist und der
+      Kilometerstand gestiegen ist. Kürzere Stopps (Bäcker, Ampel-Parken) gehören zur Fahrt.
     mode: single
     max_exceeded: silent
     triggers:
+      # 10 Minuten nach dem Parken
+      - trigger: state
+        entity_id: sensor.enyaq_parking_state
+        to: PARKED
+        for: "00:10:00"
+        id: parked
+      # Kilometerstand kommt erst später rein (Auto meldet nur alle ~15 min)
       - trigger: state
         entity_id: sensor.enyaq_mileage
         not_from: [unknown, unavailable]   # kein Lauf beim HA-Neustart
         not_to: [unknown, unavailable]
         id: km
-      - trigger: state
-        entity_id: sensor.enyaq_parking_state
-        to: PARKED
-        id: parked
+      # Absicherung, z. B. nach einem Neustart während des Parkens
+      - trigger: time_pattern
+        minutes: /15
+        id: check
     conditions:
       - condition: state
         entity_id: sensor.enyaq_parking_state
         state: PARKED
+        for: "00:10:00"
     actions:
       # kurz warten, bis alle Sensoren desselben Abrufs aktualisiert sind
       - delay: "00:00:30"

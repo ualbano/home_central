@@ -79,9 +79,10 @@ automation:
           addr: >-
             {% set a = states('sensor.enyaq_address') %}
             {{ a if a not in ['unknown', 'unavailable'] else '?' }}
+      # Ohne Adresse hat das Auto noch keine Parkposition gemeldet → kein echtes Parken
       - condition: template
         value_template: >-
-          {{ s_km is number and km_now > s_km }}
+          {{ s_km is number and km_now > s_km and addr != '?' }}
       - variables:
           km: "{{ (km_now - s_km) | round(0) | int }}"
           dsoc: "{{ s_soc - soc_now if s_soc is number and soc_now >= 0 else none }}"
@@ -125,6 +126,13 @@ script:
         data:
           message: "\uFEFFDatum;Uhrzeit;Von;Nach;km Start;km Ende;km;Akku Start %;Akku Ende %;kWh;kWh/100 km;Ladestopp"
 
+  enyaq_fahrten_zusammenfuehren:
+    alias: "Enyaq Fahrtenbuch: letzte zwei Fahrten zusammenführen"
+    description: Für Fahrten, die durch einen kurzen Stopp geteilt wurden. Die CSV-Datei bleibt unverändert.
+    icon: mdi:call-merge
+    sequence:
+      - event: enyaq_fahrten_zusammenfuehren
+
   enyaq_fahrtenbuch_zuruecksetzen:
     alias: "Enyaq Fahrtenbuch: Liste leeren"
     icon: mdi:notebook-remove-outline
@@ -152,6 +160,12 @@ template:
       - trigger: event
         event_type: enyaq_fahrtenbuch_reset
         id: reset
+      - trigger: event
+        event_type: enyaq_fahrten_zusammenfuehren
+        id: merge
+      - trigger: state
+        entity_id: sensor.enyaq_address
+        id: addr
     actions:
       - variables:
           km_now: "{{ states('sensor.enyaq_mileage') | float(-1) }}"
@@ -167,17 +181,29 @@ template:
             {{ trigger.id in ['trip', 'reset']
                or (trigger.id in ['start', 'online'] and (s_km is not number or s_soc is not number)) }}
           new_trips: >-
-            {% if trigger.id == 'trip' %}{{ ([dict(trigger.event.data)] + old_trips)[:30] }}
-            {% else %}{{ old_trips }}{% endif %}
+            {%- if trigger.id == 'trip' -%}{{ ([dict(trigger.event.data)] + old_trips)[:30] }}
+            {%- elif trigger.id == 'merge' and old_trips | count >= 2 -%}
+              {%- set b = old_trips[0] -%}{%- set a = old_trips[1] -%}
+              {%- set km = a.km + b.km -%}
+              {%- set lade = a.ladestopp or b.ladestopp -%}
+              {%- set kwh = (a.kwh + b.kwh) | round(2) if a.kwh is number and b.kwh is number and not lade else none -%}
+              {{ [dict(b, von=a.von, km=km, km_start=a.km_start, soc_start=a.soc_start, kwh=kwh,
+                       kwh_100=((kwh / km * 100) | round(1) if kwh is number and km >= 5 else none),
+                       ladestopp=lade)] + old_trips[2:] }}
+            {%- else -%}{{ old_trips }}{%- endif -%}
       - variables:
           n_km: "{{ km_now if (reinit and km_now >= 0) else s_km }}"
           n_soc: >-
             {% if reinit and soc_now >= 0 %}{{ soc_now }}
             {% elif trigger.id == 'soc' and s_soc is number and soc_now > s_soc and km_now == s_km %}{{ soc_now }}
             {% else %}{{ s_soc }}{% endif %}
+          # Startadresse der nächsten Fahrt = Ziel dieser Fahrt; fehlt sie, später nachtragen
           n_addr: >-
-            {% if (reinit or s_addr is none) and addr_now not in ['unknown', 'unavailable'] %}{{ addr_now }}
-            {% else %}{{ s_addr }}{% endif %}
+            {%- set bekannt = addr_now not in ['unknown', 'unavailable'] -%}
+            {%- if trigger.id == 'trip' and trigger.event.data.nach not in [none, '?'] -%}{{ trigger.event.data.nach }}
+            {%- elif trigger.id == 'trip' -%}{{ addr_now if bekannt else none }}
+            {%- elif (reinit or s_addr in [none, '?']) and bekannt -%}{{ addr_now }}
+            {%- else -%}{{ s_addr }}{%- endif -%}
     sensor:
       - name: Enyaq Fahrtenbuch
         unique_id: enyaq_fahrtenbuch

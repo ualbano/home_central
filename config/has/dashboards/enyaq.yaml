@@ -635,13 +635,13 @@ views:
           # Preis nachtragen – nur sichtbar, wenn eine Ladung noch keinen Preis hat
           - type: custom:mushroom-template-card
             entity: sensor.enyaq_ladelog
-            primary: Preis fehlt
+            primary: Preis und Menge eintragen
             secondary: >-
               {%- set offen = (state_attr('sensor.enyaq_ladelog', 'ladungen') or [])
                  | selectattr('preis', 'none') | list -%}
               {%- if offen -%}{%- set l = offen[0] -%}
               {{ as_local(as_datetime(l.ende)).strftime('%d.%m. %H:%M') }} ·
-              {{ (l.ort or '?').split(',')[0] }} · +{{ ('%.1f' % l.kwh) | replace('.', ',') }} kWh
+              {{ (l.ort or '?').split(',')[0] }} · +{{ ('%.1f' % l.kwh) | replace('.', ',') }} kWh im Akku gemessen
               {%- if offen | count > 1 %} · noch {{ offen | count - 1 }} weitere{% endif -%}
               {%- endif -%}
             icon: mdi:cash-remove
@@ -661,6 +661,8 @@ views:
                 entity: binary_sensor.enyaq_ladung_ohne_preis
                 state: "on"
             entities:
+              - entity: input_number.enyaq_lademenge_eingabe
+                name: kWh laut Ladesäule
               - entity: input_number.enyaq_ladepreis_eingabe
                 name: €/kWh (über 3 = Gesamtbetrag)
               - type: button
@@ -682,7 +684,7 @@ views:
               {% for l in ladungen[:10] %}
               {% set d = as_local(as_datetime(l.ende)) %}
               **{{ d.strftime('%d.%m. %H:%M') }}** · {{ l.soc_start }} → {{ l.soc_ende }} % · +{{ ('%.1f' % l.kwh) | replace('.', ',') }} kWh ·
-              {% if l.kosten is number %}**{{ ('%.2f' % l.kosten) | replace('.', ',') }} €** ({{ ('%.2f' % l.preis) | replace('.', ',') }} €/kWh){% else %}*Preis fehlt*{% endif %}
+              {% if l.kosten is number %}**{{ ('%.2f' % l.kosten) | replace('.', ',') }} €** ({{ ('%.2f' % l.preis) | replace('.', ',') }} €/kWh{% if l.menge_korrigiert is defined and l.menge_korrigiert %}, {{ ('%.1f' % l.kwh_bezahlt) | replace('.', ',') }} kWh an der Säule{% endif %}){% else %}*Preis fehlt*{% endif %}
 
               <small>{{ (l.ort or '?').split(',')[0] }}</small>
               {% if not loop.last %}<hr>{% endif %}

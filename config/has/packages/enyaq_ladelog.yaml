@@ -5,8 +5,8 @@
 #  Ablauf
 #  • Kabel eingesteckt → Akkustand, Ort und Uhrzeit werden gemerkt.
 #  • Kabel gezogen → Ladung wird eingetragen (geladene kWh aus Akku-Differenz)
-#    und es kommt eine Push-Nachricht mit Antwortfeld: Preis pro kWh eintippen.
-#    Eine Zahl über 3 wird als Gesamtbetrag in € verstanden.
+#    und es kommt eine Push-Nachricht: Anbieter antippen, oder "Anderer Preis"
+#    und Preis pro kWh eintippen (eine Zahl über 3 = Gesamtbetrag in €).
 #  • Verpasst? Auf dem Dashboard für die letzte offene Ladung nachtragen – dort
 #    lässt sich auch die geladene Menge laut Ladesäule korrigieren.
 #
@@ -20,6 +20,22 @@
 #  Hinweis: Geladene kWh = Akku-Differenz × nutzbare Kapazität. Bezahlt wird
 #  mehr, weil beim Laden Verluste entstehen → input_number.enyaq_ladeverlust.
 # ═══════════════════════════════════════════════════════════════
+
+# Ladeanbieter – Preis steht im Namen ("… · 0,39 €/kWh") und wird daraus gelesen.
+# Neuen Anbieter oder Preis? Nur hier ändern, Dashboard und Push übernehmen das.
+input_select:
+  enyaq_ladeanbieter:
+    name: Enyaq Ladeanbieter
+    icon: mdi:ev-station
+    options:
+      - EnBW · 0,39 €/kWh
+      - Vattenfall · 0,44 €/kWh
+      - Shell · 0,52 €/kWh
+      - Aral · 0,55 €/kWh
+      - Wemag (AC) · 0,49 €/kWh
+      - EWE Go · 0,52 €/kWh
+      - Kostenlos
+      - Andere
 
 input_number:
   enyaq_ladeverlust:
@@ -92,20 +108,26 @@ automation:
       # nur sinnvolle Ladungen abfragen
       - condition: template
         value_template: "{{ kwh >= 1 }}"
+      - variables:
+          # ein Knopf je Anbieter (+ Kostenlos), dazu "Anderer Preis" mit Eingabefeld
+          push_actions: >-
+            {%- set ns = namespace(l=[]) -%}
+            {%- for o in state_attr('input_select.enyaq_ladeanbieter', 'options') or [] -%}
+              {%- if o != 'Andere' -%}
+                {%- set ns.l = ns.l + [{'action': 'ENYAQ_ANB_' ~ lid ~ '_' ~ loop.index0, 'title': o}] -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ ns.l + [{'action': 'ENYAQ_PREIS_' ~ lid, 'title': 'Anderer Preis …', 'behavior': 'textInput',
+                        'textInputButtonTitle': 'Speichern', 'textInputPlaceholder': '0,59'}] }}
       - action: notify.mobile_app_iphoneumberto
         data:
           title: "⚡ Ladung beendet"
           message: >-
             {{ ort_kurz }}: {{ aktiv.soc_start | int }} → {{ soc_ende | int }} %
-            (+{{ ('%.1f' % kwh) | replace('.', ',') }} kWh). Was hat die kWh gekostet?
+            (+{{ ('%.1f' % kwh) | replace('.', ',') }} kWh). Wo geladen? Lange drücken für die Auswahl.
           data:
             tag: "enyaq-ladung-{{ lid }}"
-            actions:
-              - action: "ENYAQ_PREIS_{{ lid }}"
-                title: Preis eintragen
-                behavior: textInput
-                textInputButtonTitle: Speichern
-                textInputPlaceholder: "0,59"
+            actions: "{{ push_actions }}"
 
   - id: enyaq_ladelog_preis_antwort
     alias: "Enyaq Ladelog: Preis aus Push übernehmen"
@@ -116,13 +138,28 @@ automation:
     conditions:
       - condition: template
         value_template: >-
-          {{ (trigger.event.data.action | default('')) is string
-             and (trigger.event.data.action | default('')).startswith('ENYAQ_PREIS_') }}
+          {%- set a = trigger.event.data.action | default('') -%}
+          {{ a is string and (a.startswith('ENYAQ_PREIS_') or a.startswith('ENYAQ_ANB_')) }}
     actions:
-      - action: script.enyaq_ladung_preis_setzen
-        data:
-          ladung_id: "{{ trigger.event.data.action[12:] }}"
-          preis: "{{ trigger.event.data.reply_text | default('') }}"
+      - variables:
+          a: "{{ trigger.event.data.action }}"
+          optionen: "{{ state_attr('input_select.enyaq_ladeanbieter', 'options') or [] }}"
+      - if:
+          - condition: template
+            value_template: "{{ a.startswith('ENYAQ_ANB_') }}"
+        then:
+          - variables:
+              teile: "{{ a[10:].split('_') }}"
+          - action: script.enyaq_ladung_preis_setzen
+            data:
+              ladung_id: "{{ teile[0] }}"
+              anbieter: "{{ optionen[teile[1] | int] if teile[1] | int < optionen | count else 'Andere' }}"
+        else:
+          - action: script.enyaq_ladung_preis_setzen
+            data:
+              ladung_id: "{{ a[12:] }}"
+              anbieter: Andere
+              preis: "{{ trigger.event.data.reply_text | default('') }}"
 
   # Formular im Dashboard: geschätzte Menge an der Säule vorbelegen
   - id: enyaq_ladelog_formular_vorbelegen
@@ -154,10 +191,16 @@ script:
     icon: mdi:cash-plus
     mode: queued
     fields:
+      anbieter:
+        name: Anbieter
+        description: Eine Option aus input_select.enyaq_ladeanbieter – leer oder "Andere" = Preis aus dem Feld "Preis"
+        required: false
+        selector:
+          text:
       preis:
         name: Preis
-        description: €/kWh (z. B. 0,59) – Werte über 3 gelten als Gesamtbetrag in €
-        required: true
+        description: Nur bei "Andere" – €/kWh (z. B. 0,59), Werte über 3 gelten als Gesamtbetrag in €
+        required: false
         selector:
           text:
       menge:
@@ -175,7 +218,16 @@ script:
     sequence:
       - variables:
           ladungen: "{{ state_attr('sensor.enyaq_ladelog', 'ladungen') or [] }}"
-          p: "{{ (preis | string | replace('€', '') | replace(',', '.') | trim) | float(-1) }}"
+          anb: "{{ (anbieter | default('Andere') | string | trim) or 'Andere' }}"
+          kostenlos: "{{ anb == 'Kostenlos' }}"
+          # Preis aus dem Anbieter-Namen ("EnBW · 0,39 €/kWh"), sonst aus dem Feld
+          p: >-
+            {%- set a = anbieter | default('Andere') | string -%}
+            {%- set aus_name = a | regex_findall('([0-9]+,[0-9]+) ?€') -%}
+            {%- if a == 'Kostenlos' -%}0
+            {%- elif aus_name -%}{{ aus_name[0] | replace(',', '.') | float(-1) }}
+            {%- else -%}{{ (preis | default('') | string | replace('€', '') | replace(',', '.') | trim) | float(-1) }}
+            {%- endif -%}
           m: "{{ ((menge | default('')) | string | lower | replace('kwh', '') | replace(',', '.') | trim) | float(0) }}"
           sid: >-
             {%- if ladung_id is defined and ladung_id | string | length > 0 -%}{{ ladung_id | string }}
@@ -184,7 +236,7 @@ script:
       - variables:
           l: "{{ ladungen | selectattr('id', 'eq', sid | int(0)) | list | first | default(none) }}"
       - condition: template
-        value_template: "{{ p > 0 and l is mapping and l.kwh > 0 }}"
+        value_template: "{{ (p > 0 or kostenlos) and l is mapping and l.kwh > 0 }}"
       - variables:
           verlust: "{{ states('input_number.enyaq_ladeverlust') | float(10) }}"
       - variables:
@@ -203,6 +255,7 @@ script:
           kosten: "{{ kosten }}"
           kwh_bezahlt: "{{ kwh_bezahlt }}"
           menge_korrigiert: "{{ menge_korrigiert }}"
+          anbieter: "{{ anb.split(' · ')[0] }}"
           # Korrektur: alten Betrag von der Summe abziehen
           kosten_alt: "{{ l.kosten if l.kosten is number else 0 }}"
           kwh_alt: >-
@@ -217,7 +270,7 @@ script:
           message: >-
             {%- macro n(x, f='%.2f') -%}{{ (f % x) | replace('.', ',') }}{%- endmacro -%}
             {%- set s = as_local(as_datetime(l.ende)) -%}
-            {{ s.strftime('%d.%m.%Y') }};{{ s.strftime('%H:%M') }};{{ (l.ort or '?') | replace(';', ',') }};{{ l.soc_start }};{{ l.soc_ende }};{{ n(l.kwh, '%.1f') }};{{ n(kwh_bezahlt, '%.1f') }};{{ n(kwh_preis, '%.3f') }};{{ n(kosten) }}
+            {{ s.strftime('%d.%m.%Y') }};{{ s.strftime('%H:%M') }};{{ (l.ort or '?') | replace(';', ',') }};{{ l.soc_start }};{{ l.soc_ende }};{{ n(l.kwh, '%.1f') }};{{ n(kwh_bezahlt, '%.1f') }};{{ n(kwh_preis, '%.3f') }};{{ n(kosten) }};{{ anb.split(' · ')[0] }}
 
   enyaq_ladepreis_nachtragen:
     alias: "Enyaq Ladelog: Preis nachtragen (Dashboard)"
@@ -225,6 +278,7 @@ script:
     sequence:
       - action: script.enyaq_ladung_preis_setzen
         data:
+          anbieter: "{{ states('input_select.enyaq_ladeanbieter') }}"
           preis: "{{ states('input_number.enyaq_ladepreis_eingabe') }}"
           menge: "{{ states('input_number.enyaq_lademenge_eingabe') }}"
 
@@ -236,7 +290,7 @@ script:
         target:
           entity_id: notify.ladelog_csv
         data:
-          message: "\uFEFFDatum;Uhrzeit;Ort;Akku Start %;Akku Ende %;kWh in Akku;kWh bezahlt;€/kWh;Kosten €"
+          message: "\uFEFFDatum;Uhrzeit;Ort;Akku Start %;Akku Ende %;kWh in Akku;kWh bezahlt;€/kWh;Kosten €;Anbieter"
 
   enyaq_ladelog_zuruecksetzen:
     alias: "Enyaq Ladelog: Liste leeren"
@@ -299,7 +353,7 @@ template:
               {%- for x in old -%}
                 {%- if x.id == d.id -%}
                   {%- set ns.l = ns.l + [dict(x, preis=d.preis, kosten=d.kosten, kwh_bezahlt=d.kwh_bezahlt,
-                                               menge_korrigiert=d.menge_korrigiert)] -%}
+                                               menge_korrigiert=d.menge_korrigiert, anbieter=d.anbieter)] -%}
                 {%- else -%}
                   {%- set ns.l = ns.l + [x] -%}
                 {%- endif -%}

@@ -661,10 +661,18 @@ views:
                 entity: binary_sensor.enyaq_ladung_ohne_preis
                 state: "on"
             entities:
+              - entity: input_select.enyaq_ladeanbieter
+                name: Anbieter
               - entity: input_number.enyaq_lademenge_eingabe
                 name: kWh laut Ladesäule
-              - entity: input_number.enyaq_ladepreis_eingabe
-                name: €/kWh (über 3 = Gesamtbetrag)
+              # Preisfeld nur bei "Andere"
+              - type: conditional
+                conditions:
+                  - entity: input_select.enyaq_ladeanbieter
+                    state: Andere
+                row:
+                  entity: input_number.enyaq_ladepreis_eingabe
+                  name: €/kWh (über 3 = Gesamtbetrag)
               - type: button
                 name: Für diese Ladung speichern
                 icon: mdi:content-save
@@ -684,7 +692,7 @@ views:
               {% for l in ladungen[:10] %}
               {% set d = as_local(as_datetime(l.ende)) %}
               **{{ d.strftime('%d.%m. %H:%M') }}** · {{ l.soc_start }} → {{ l.soc_ende }} % · +{{ ('%.1f' % l.kwh) | replace('.', ',') }} kWh ·
-              {% if l.kosten is number %}**{{ ('%.2f' % l.kosten) | replace('.', ',') }} €** ({{ ('%.2f' % l.preis) | replace('.', ',') }} €/kWh{% if l.menge_korrigiert is defined and l.menge_korrigiert %}, {{ ('%.1f' % l.kwh_bezahlt) | replace('.', ',') }} kWh an der Säule{% endif %}){% else %}*Preis fehlt*{% endif %}
+              {% if l.kosten is number %}**{{ ('%.2f' % l.kosten) | replace('.', ',') }} €** ({% if l.anbieter is defined and l.anbieter not in [none, 'Andere'] %}{{ l.anbieter }}, {% endif %}{{ ('%.2f' % l.preis) | replace('.', ',') }} €/kWh{% if l.menge_korrigiert is defined and l.menge_korrigiert %}, {{ ('%.1f' % l.kwh_bezahlt) | replace('.', ',') }} kWh an der Säule{% endif %}){% else %}*Preis fehlt*{% endif %}
 
               <small>{{ (l.ort or '?').split(',')[0] }}</small>
               {% if not loop.last %}<hr>{% endif %}
